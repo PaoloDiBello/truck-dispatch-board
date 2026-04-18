@@ -52,7 +52,7 @@ export default function App() {
         setVehicles(vs.length ? vs : DEFAULT_VEHICLES.map(v => ({ ...v })));
         setCells(cs);
         setSavedTags(tgs.length ? tgs : DEFAULT_TAGS);
-        if (key) setApiKey(key);
+        setApiKey(key || import.meta.env.VITE_ORS_KEY || '');
         if (sat) setSat(sat === 'true');
         // Seed default vehicles if none exist
         if (!vs.length) {
