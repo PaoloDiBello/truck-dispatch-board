@@ -236,20 +236,25 @@ export function CellEditor({ date, data, apiKey, savedTags, onSave, onClear, onC
                         </div>
 
                         {/* Calculate */}
-                        <div className="flex items-center gap-3">
-                          <button type="button" onClick={() => calcRoute(i)} disabled={calculating === i}
-                            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-40 font-medium transition">
-                            <Calculator className="w-3.5 h-3.5" />
-                            {calculating === i ? 'Calculando…' : 'Calcular distancia'}
-                          </button>
-                          {r.distanceKm != null && (
-                            <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                              <span className="font-bold">{r.distanceKm} km</span>
-                              <span className="text-slate-300">·</span>
-                              <span className="text-slate-500">{formatDuration(r.estimatedMinutes)}</span>
-                              {r.source === 'APROX' && <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[11px] font-bold">APROX</span>}
-                            </div>
-                          )}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-3">
+                            <button type="button" onClick={() => calcRoute(i)} disabled={calculating === i}
+                              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-40 font-medium transition">
+                              <Calculator className="w-3.5 h-3.5" />
+                              {calculating === i ? 'Calculando…' : 'Calcular ruta'}
+                            </button>
+                            {r.distanceKm != null && (
+                              <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                                <span className="font-bold">{r.distanceKm} km</span>
+                                <span className="text-slate-300">·</span>
+                                <span className="text-slate-500">{formatDuration(r.estimatedMinutes)}</span>
+                                {r.source === 'APROX' && <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[11px] font-bold">APROX</span>}
+                              </div>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-400 leading-tight">
+                            Calcula distancia y estima la hora de llegada · máx. 90 km/h · pausa 45 min cada 4 h
+                          </p>
                         </div>
                         {routeErrors[i] && (
                           <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
