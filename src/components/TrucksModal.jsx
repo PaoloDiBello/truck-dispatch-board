@@ -1,11 +1,33 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useForm } from 'react-hook-form';
-import { Plus, Trash2, Truck, X, Edit2, User } from 'lucide-react';
+import { Plus, Trash2, Truck, X, Edit2, User, GripVertical } from 'lucide-react';
 import { inputCls } from './primitives';
 
-export function TrucksModal({ vehicles, onAdd, onUpdate, onDelete, onClose }) {
+export function TrucksModal({ vehicles, onAdd, onUpdate, onDelete, onReorder, onClose }) {
   const { register, handleSubmit, reset } = useForm({ defaultValues: { plate: '', driver: '' } });
+  const [dragList, setDragList] = useState(vehicles);
+  const dragIdx = useRef(null);
+  const dragOver = useRef(null);
+  const [dragging, setDragging] = useState(false);
+
+  // Keep dragList in sync when vehicles prop changes (add/delete)
+  const syncedList = vehicles; // use vehicles as source of truth unless mid-drag
+
   const submit = (data) => { if (!data.plate.trim()) return; onAdd(data); reset(); };
+
+  const handleDragStart = (i) => { dragIdx.current = i; setDragging(true); };
+  const handleDragEnter = (i) => { dragOver.current = i; };
+  const handleDragEnd   = () => {
+    setDragging(false);
+    if (dragIdx.current === null || dragOver.current === null || dragIdx.current === dragOver.current) {
+      dragIdx.current = null; dragOver.current = null; return;
+    }
+    const reordered = [...vehicles];
+    const [moved] = reordered.splice(dragIdx.current, 1);
+    reordered.splice(dragOver.current, 0, moved);
+    dragIdx.current = null; dragOver.current = null;
+    onReorder(reordered);
+  };
 
   return (
     <div className="fixed inset-0 z-40 flex">
@@ -18,20 +40,28 @@ export function TrucksModal({ vehicles, onAdd, onUpdate, onDelete, onClose }) {
             </div>
             <div>
               <div className="font-bold text-slate-900">Gestionar flota</div>
-              <div className="text-xs text-slate-500">{vehicles.length} camión{vehicles.length !== 1 ? 'es' : ''}</div>
+              <div className="text-xs text-slate-500">{vehicles.length} camión{vehicles.length !== 1 ? 'es' : ''} · arrastra para reordenar</div>
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"><X className="w-5 h-5" /></button>
         </header>
 
-        <div className="flex-1 overflow-y-auto py-3 px-4 space-y-2">
+        <div className="flex-1 overflow-y-auto py-3 px-4 space-y-1.5">
           {vehicles.length === 0 && (
             <div className="py-12 text-center text-slate-400 text-sm">Añade tu primer camión abajo.</div>
           )}
           {vehicles.map((v, idx) => (
-            <TruckRow key={v.id} vehicle={v} index={idx + 1}
+            <TruckRow
+              key={v.id}
+              vehicle={v}
+              index={idx + 1}
               onUpdate={(d) => onUpdate(v.id, d)}
               onDelete={() => onDelete(v.id)}
+              onDragStart={() => handleDragStart(idx)}
+              onDragEnter={() => handleDragEnter(idx)}
+              onDragEnd={handleDragEnd}
+              isDragging={dragging && dragIdx.current === idx}
+              isOver={dragging && dragOver.current === idx && dragIdx.current !== idx}
             />
           ))}
         </div>
@@ -59,7 +89,7 @@ export function TrucksModal({ vehicles, onAdd, onUpdate, onDelete, onClose }) {
   );
 }
 
-function TruckRow({ vehicle, index, onUpdate, onDelete }) {
+function TruckRow({ vehicle, index, onUpdate, onDelete, onDragStart, onDragEnter, onDragEnd, isDragging, isOver }) {
   const [editing, setEditing] = useState(false);
   const { register, handleSubmit, reset } = useForm({ defaultValues: { plate: vehicle.plate, driver: vehicle.driver } });
   const save   = (d) => { onUpdate(d); setEditing(false); };
@@ -85,7 +115,20 @@ function TruckRow({ vehicle, index, onUpdate, onDelete }) {
   );
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex items-center gap-3 group hover:border-slate-300 transition-colors">
+    <div
+      draggable
+      onDragStart={onDragStart}
+      onDragEnter={onDragEnter}
+      onDragEnd={onDragEnd}
+      onDragOver={e => e.preventDefault()}
+      className={`bg-white border rounded-xl px-3 py-3 flex items-center gap-3 group hover:border-slate-300 transition-all select-none
+        ${isDragging ? 'opacity-40 scale-[0.98]' : ''}
+        ${isOver ? 'border-blue-400 border-2 shadow-md shadow-blue-100' : 'border-slate-200'}
+      `}
+    >
+      <div className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 transition-colors flex-shrink-0 touch-none" title="Arrastrar para reordenar">
+        <GripVertical className="w-4 h-4" />
+      </div>
       <div className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-500 flex-shrink-0">{index}</div>
       <div className="flex-1 min-w-0">
         <div className="font-bold text-sm text-slate-800 font-mono">

@@ -181,6 +181,7 @@ export function CellEditor({ date, data, apiKey, savedTags, onSave, onClear, onC
                             onChange={(val) => setValue(`routes.${i}.origin`, val)}
                             placeholder="Origen"
                             apiKey={apiKey}
+                            fullAddress
                             icon={<MapPin className="w-3.5 h-3.5" />}
                           />
                           <ArrowRight className="w-4 h-4 text-slate-300 flex-shrink-0" />
@@ -190,6 +191,7 @@ export function CellEditor({ date, data, apiKey, savedTags, onSave, onClear, onC
                             onChange={(val) => setValue(`routes.${i}.destination`, val)}
                             placeholder="Destino"
                             apiKey={apiKey}
+                            fullAddress
                             icon={<Navigation className="w-3.5 h-3.5" />}
                           />
                         </div>

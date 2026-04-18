@@ -12,15 +12,18 @@ async function fetchSuggestions(query, apiKey) {
   if (apiKey) {
     try {
       const res = await fetch(
-        `https://api.openrouteservice.org/geocode/autocomplete?api_key=${apiKey}&text=${encodeURIComponent(query)}&size=6&layers=locality,county,region,country`,
+        `https://api.openrouteservice.org/geocode/autocomplete?api_key=${apiKey}&text=${encodeURIComponent(query)}&size=6&layers=locality,county,region,country,postalcode`,
         { headers: { 'Accept-Language': 'es' } }
       );
       const data = await res.json();
       if (data.features?.length) {
-        const results = data.features.map(f => ({
-          label: f.properties.label,
-          short: f.properties.name || f.properties.label.split(',')[0],
-        }));
+        const results = data.features.map(f => {
+          const p = f.properties;
+          const postal = p.postalcode || p.postcode || '';
+          const city = p.locality || p.name || p.label.split(',')[0];
+          const short = postal ? `${city} · ${postal}` : city;
+          return { label: p.label, short };
+        });
         cache[key] = results;
         return results;
       }
@@ -45,7 +48,7 @@ async function fetchSuggestions(query, apiKey) {
   }
 }
 
-export function AddressInput({ value, onChange, placeholder, apiKey, icon, className = '' }) {
+export function AddressInput({ value, onChange, placeholder, apiKey, icon, className = '', fullAddress = false }) {
   const [query, setQuery]           = useState(value || '');
   const [suggestions, setSuggestions] = useState([]);
   const [open, setOpen]             = useState(false);
@@ -83,8 +86,9 @@ export function AddressInput({ value, onChange, placeholder, apiKey, icon, class
   };
 
   const select = (item) => {
-    setQuery(item.short);
-    onChange(item.short);
+    const chosen = fullAddress ? item.label : item.short;
+    setQuery(chosen);
+    onChange(chosen);
     setSuggestions([]);
     setOpen(false);
     setActiveIdx(-1);

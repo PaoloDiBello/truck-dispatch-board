@@ -38,6 +38,13 @@ export default function App() {
 
   const weekDates = getWeekDates(weekOffset, includeSaturday);
 
+  // ── BROWSER NOTIFICATION PERMISSION ────────────────────────────────────────
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
+
   // ── LOAD FROM SUPABASE ──────────────────────────────────────────────────────
   useEffect(() => {
     (async () => {
@@ -81,7 +88,14 @@ export default function App() {
         cell.routes?.forEach(r => {
           if (r.arrivalDate === today && r.arrivalTime <= currentTime && !r._notified && r.origin && r.destination) {
             const vehicle = vehicles.find(v => v.id === key.split('_')[0]);
-            setNotification({ vehicle: vehicle?.plate || 'Camión', driver: vehicle?.driver || '', route: `${r.origin} → ${r.destination}`, time: r.arrivalTime });
+            const notifData = { vehicle: vehicle?.plate || 'Camión', driver: vehicle?.driver || '', route: `${r.origin} → ${r.destination}`, time: r.arrivalTime };
+            setNotification(notifData);
+            if ('Notification' in window && Notification.permission === 'granted') {
+              new Notification(`Llegada estimada · ${notifData.vehicle}`, {
+                body: `${notifData.route}\nHora prevista: ${notifData.time}${notifData.driver ? ` · ${notifData.driver}` : ''}`,
+                icon: '/favicon.ico',
+              });
+            }
             setCells(prev => ({
               ...prev,
               [key]: { ...prev[key], routes: prev[key].routes.map(rt => rt === r ? { ...rt, _notified: true } : rt) },
@@ -105,6 +119,11 @@ export default function App() {
   const updateVehicle = async (id, data) => {
     await dbUpdateVehicle(id, data);
     setVehicles(p => p.map(v => v.id === id ? { ...v, ...data } : v));
+  };
+
+  const reorderVehicles = async (newOrder) => {
+    setVehicles(newOrder);
+    await Promise.all(newOrder.map((v, i) => dbUpdateVehicle(v.id, { position: i })));
   };
 
   const deleteVehicle = (id) => {
@@ -409,7 +428,7 @@ export default function App() {
 
       {/* MODALS */}
       {showTrucks && (
-        <TrucksModal vehicles={vehicles} onAdd={addVehicle} onUpdate={updateVehicle} onDelete={deleteVehicle} onClose={() => setShowTrucks(false)} />
+        <TrucksModal vehicles={vehicles} onAdd={addVehicle} onUpdate={updateVehicle} onDelete={deleteVehicle} onReorder={reorderVehicles} onClose={() => setShowTrucks(false)} />
       )}
       {editingCell && (
         <CellEditor
