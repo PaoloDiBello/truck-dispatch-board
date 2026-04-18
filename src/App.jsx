@@ -29,7 +29,8 @@ export default function App() {
   const [showTrucks, setShowTrucks]       = useState(false);
   const [hoveredCell, setHoveredCell]     = useState(null);
   const [tooltipPos, setTooltipPos]       = useState({ x: 0, y: 0 });
-  const [notification, setNotification]   = useState(null);
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [loading, setLoading]             = useState(true);
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [toast, setToast]                 = useState(null);
@@ -79,20 +80,31 @@ export default function App() {
   }, []);
 
   // ── ARRIVAL NOTIFICATIONS ───────────────────────────────────────────────────
+  const dismissNotif = (id) => setNotifications(p => p.filter(n => n.id !== id));
+  const dismissAllNotifs = () => setNotifications([]);
+
   useEffect(() => {
     const tick = setInterval(() => {
       const now = new Date();
       const currentTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
       const today = toISODate(now);
+      const newNotifs = [];
       Object.entries(cells).forEach(([key, cell]) => {
         cell.routes?.forEach(r => {
           if (r.arrivalDate === today && r.arrivalTime <= currentTime && !r._notified && r.origin && r.destination) {
             const vehicle = vehicles.find(v => v.id === key.split('_')[0]);
-            const notifData = { vehicle: vehicle?.plate || 'Camión', driver: vehicle?.driver || '', route: `${r.origin} → ${r.destination}`, time: r.arrivalTime };
-            setNotification(notifData);
+            const notif = {
+              id: `${key}_${r.origin}_${r.arrivalTime}`,
+              vehicleId: key.split('_')[0],
+              vehicle: vehicle?.plate || 'Camión',
+              driver: vehicle?.driver || '',
+              route: `${r.origin} → ${r.destination}`,
+              time: r.arrivalTime,
+            };
+            newNotifs.push(notif);
             if ('Notification' in window && Notification.permission === 'granted') {
-              new Notification(`Llegada estimada · ${notifData.vehicle}`, {
-                body: `${notifData.route}\nHora prevista: ${notifData.time}${notifData.driver ? ` · ${notifData.driver}` : ''}`,
+              new Notification(`Llegada estimada · ${notif.vehicle}`, {
+                body: `${notif.route}\nHora prevista: ${notif.time}${notif.driver ? ` · ${notif.driver}` : ''}`,
                 icon: '/favicon.ico',
               });
             }
@@ -103,6 +115,10 @@ export default function App() {
           }
         });
       });
+      if (newNotifs.length > 0) {
+        setNotifications(p => [...p, ...newNotifs]);
+        setShowNotifPanel(true);
+      }
     }, 30000);
     return () => clearInterval(tick);
   }, [cells, vehicles]);
@@ -294,14 +310,20 @@ export default function App() {
             </button>
             <button
               onClick={() => {
-                const mock = { vehicle: 'TEST-123', driver: 'Conductor', route: 'Madrid → Barcelona', time: new Date().toTimeString().slice(0,5) };
-                setNotification(mock);
+                const mock = { id: `mock_${Date.now()}`, vehicleId: null, vehicle: 'TEST-123', driver: 'Conductor', route: 'Madrid → Barcelona', time: new Date().toTimeString().slice(0,5) };
+                setNotifications(p => [...p, mock]);
+                setShowNotifPanel(true);
                 if ('Notification' in window && Notification.permission === 'granted') {
                   new Notification(`Llegada estimada · ${mock.vehicle}`, { body: `${mock.route}\nHora prevista: ${mock.time} · ${mock.driver}`, icon: '/favicon.ico' });
                 }
               }}
-              className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-400 hover:text-amber-500" title="Test notificación">
+              className="relative p-2 hover:bg-slate-100 rounded-lg transition text-slate-400 hover:text-amber-500" title="Test notificación / ver alertas">
               <Bell className="w-4 h-4" />
+              {notifications.length > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center leading-none">
+                  {notifications.length > 9 ? '9+' : notifications.length}
+                </span>
+              )}
             </button>
             <button onClick={() => setShowSettings(true)} className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-600" title="Ajustes">
               <Settings className="w-4 h-4" />
@@ -446,6 +468,8 @@ export default function App() {
           vehicleId={editingCell.vehicleId} date={editingCell.date} data={editingCell.data}
           apiKey={apiKey}
           savedTags={savedTags}
+          arrivingRoutes={notifications.filter(n => n.vehicleId === editingCell.vehicleId)}
+          onDismissNotif={dismissNotif}
           onSave={async (data) => { await saveCell(editingCell.vehicleId, editingCell.date, data); setEditingCell(null); }}
           onClear={() => {
             const plate = vehicles.find(v => v.id === editingCell.vehicleId)?.plate || 'este camión';
@@ -471,19 +495,33 @@ export default function App() {
         <ConfirmDialog {...confirmDialog} onCancel={() => setConfirmDialog(null)} />
       )}
 
-      {notification && (
-        <div className="fixed top-4 right-4 z-50 bg-white rounded-xl shadow-2xl border border-slate-200 max-w-sm overflow-hidden">
-          <div className="border-l-4 border-emerald-500 p-4 flex items-start gap-3">
-            <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0">
-              <Bell className="w-4 h-4 text-emerald-600" />
+      {/* NOTIFICATION PANEL */}
+      {showNotifPanel && notifications.length > 0 && (
+        <div className="fixed top-16 right-4 z-50 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 bg-emerald-600 text-white">
+            <div className="flex items-center gap-2 font-bold text-sm">
+              <Bell className="w-4 h-4" />
+              Llegadas pendientes ({notifications.length})
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="font-bold text-slate-800">Llegada estimada</div>
-              <div className="text-sm text-slate-700 font-medium mt-0.5">{notification.vehicle}{notification.driver && ` · ${notification.driver}`}</div>
-              <div className="text-sm text-slate-600">{notification.route}</div>
-              <div className="text-xs text-slate-500 mt-0.5">Hora prevista: <strong>{notification.time}</strong></div>
+            <div className="flex items-center gap-1">
+              <button onClick={dismissAllNotifs} className="text-xs text-emerald-200 hover:text-white px-2 py-0.5 rounded hover:bg-white/20 transition">Limpiar todo</button>
+              <button onClick={() => setShowNotifPanel(false)} className="hover:bg-white/20 rounded-lg p-1 transition"><X className="w-4 h-4" /></button>
             </div>
-            <button onClick={() => setNotification(null)} className="text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
+          </div>
+          <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+            {notifications.map(n => (
+              <div key={n.id} className="p-3 flex items-start gap-3 hover:bg-slate-50 transition">
+                <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <Bell className="w-3.5 h-3.5 text-emerald-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-sm text-slate-800">{n.vehicle}{n.driver && <span className="font-normal text-slate-500"> · {n.driver}</span>}</div>
+                  <div className="text-xs text-slate-600 truncate mt-0.5">{n.route}</div>
+                  <div className="text-xs text-emerald-700 font-semibold mt-0.5">Hora prevista: {n.time}</div>
+                </div>
+                <button onClick={() => dismissNotif(n.id)} className="text-slate-300 hover:text-red-400 transition flex-shrink-0 mt-0.5"><X className="w-3.5 h-3.5" /></button>
+              </div>
+            ))}
           </div>
         </div>
       )}

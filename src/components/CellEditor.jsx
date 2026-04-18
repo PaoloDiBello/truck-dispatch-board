@@ -4,13 +4,13 @@ import { AddressInput } from './AddressInput';
 import {
   Plus, Trash2, X, Clock, MapPin, Euro, Package, Phone, Building2,
   Truck, Calendar, Edit2, AlertCircle, ArrowRight, Calculator,
-  StickyNote, Tag as TagIcon, User, Navigation, ChevronDown, Check,
+  StickyNote, Tag as TagIcon, User, Navigation, ChevronDown, Check, CheckCircle2,
 } from 'lucide-react';
 import { TAG_COLORS, COLOR_CYCLE } from '../constants';
 import { uid, formatDateFull, toISODate, daysBetween, calculateDrivingTime, formatDuration, addMinutesToDateTime, getRouteDistance } from '../utils';
 import { SectionLabel, IconInput } from './primitives';
 
-export function CellEditor({ date, data, apiKey, savedTags, onSave, onClear, onCancel, onAddTag, onDeleteTag, vehicleName, driverName }) {
+export function CellEditor({ date, data, apiKey, savedTags, arrivingRoutes = [], onDismissNotif, onSave, onClear, onCancel, onAddTag, onDeleteTag, vehicleName, driverName }) {
   const defaultRoute = () => ({
     origin: '', destination: '',
     departureDate: toISODate(date), departureTime: '',
@@ -18,7 +18,7 @@ export function CellEditor({ date, data, apiKey, savedTags, onSave, onClear, onC
     distanceKm: null, estimatedMinutes: null, source: null,
   });
 
-  const { register, handleSubmit, control, watch, setValue, getValues } = useForm({
+  const { register, handleSubmit, control, watch, setValue, getValues, formState: { errors } } = useForm({
     defaultValues: {
       title:   data.title   || '',
       routes:  data.routes?.length ? data.routes : [defaultRoute()],
@@ -114,6 +114,27 @@ export function CellEditor({ date, data, apiKey, savedTags, onSave, onClear, onC
             </button>
           </div>
         </header>
+
+        {/* Arriving routes alert */}
+        {arrivingRoutes.length > 0 && (
+          <div className="bg-emerald-50 border-b border-emerald-200 px-4 py-3 space-y-2">
+            <div className="flex items-center gap-2 text-emerald-800 font-bold text-xs uppercase tracking-wider">
+              <CheckCircle2 className="w-3.5 h-3.5" /> {arrivingRoutes.length === 1 ? 'Llegada pendiente de confirmar' : `${arrivingRoutes.length} llegadas pendientes`}
+            </div>
+            {arrivingRoutes.map(n => (
+              <div key={n.id} className="flex items-center justify-between gap-2 bg-white border border-emerald-200 rounded-xl px-3 py-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-slate-800 truncate">{n.route}</div>
+                  <div className="text-xs text-emerald-700 font-medium">Hora prevista: {n.time}</div>
+                </div>
+                <button type="button" onClick={() => onDismissNotif?.(n.id)}
+                  className="flex-shrink-0 px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-bold transition">
+                  Confirmar
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Scrollable content */}
         <div className="flex-1 overflow-y-auto">
@@ -228,8 +249,18 @@ export function CellEditor({ date, data, apiKey, savedTags, onSave, onClear, onC
                             </div>
                             <div className="relative">
                               <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
-                              <input type="date" {...register(`routes.${i}.arrivalDate`)} min={r.departureDate} className="w-full pl-8 pr-2 py-2 text-sm border border-slate-200 rounded-lg focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none transition" />
+                              <input type="date"
+                              {...register(`routes.${i}.arrivalDate`, {
+                                validate: v => !r.departureDate || v >= r.departureDate || 'La llegada no puede ser antes de la salida',
+                              })}
+                              min={r.departureDate}
+                              className="w-full pl-8 pr-2 py-2 text-sm border border-slate-200 rounded-lg focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none transition" />
                             </div>
+                            {errors.routes?.[i]?.arrivalDate && (
+                              <div className="flex items-center gap-1 text-xs text-red-600">
+                                <AlertCircle className="w-3 h-3 flex-shrink-0" />{errors.routes[i].arrivalDate.message}
+                              </div>
+                            )}
                             <div className="relative">
                               <Clock className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
                               <input type="time" {...register(`routes.${i}.arrivalTime`)} className="w-full pl-8 pr-2 py-2 text-sm border border-slate-200 rounded-lg focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none transition" />
