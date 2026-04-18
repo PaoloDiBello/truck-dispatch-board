@@ -24,8 +24,11 @@ export const getWeekDates = (offset = 0, includeSaturday = false) => {
 
 export const toISODate = (d) => {
   const dd = new Date(d);
-  dd.setHours(0, 0, 0, 0);
-  return dd.toISOString().slice(0, 10);
+  return [
+    dd.getFullYear(),
+    String(dd.getMonth() + 1).padStart(2, '0'),
+    String(dd.getDate()).padStart(2, '0'),
+  ].join('-');
 };
 
 export const isSameDay = (a, b) => toISODate(a) === toISODate(b);

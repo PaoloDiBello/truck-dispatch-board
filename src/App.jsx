@@ -292,6 +292,17 @@ export default function App() {
               className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg hover:border-blue-400 hover:text-blue-600 text-sm font-medium transition">
               <Truck className="w-4 h-4" /><span className="hidden sm:inline">Gestionar flota</span>
             </button>
+            <button
+              onClick={() => {
+                const mock = { vehicle: 'TEST-123', driver: 'Conductor', route: 'Madrid → Barcelona', time: new Date().toTimeString().slice(0,5) };
+                setNotification(mock);
+                if ('Notification' in window && Notification.permission === 'granted') {
+                  new Notification(`Llegada estimada · ${mock.vehicle}`, { body: `${mock.route}\nHora prevista: ${mock.time} · ${mock.driver}`, icon: '/favicon.ico' });
+                }
+              }}
+              className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-400 hover:text-amber-500" title="Test notificación">
+              <Bell className="w-4 h-4" />
+            </button>
             <button onClick={() => setShowSettings(true)} className="p-2 hover:bg-slate-100 rounded-lg transition text-slate-600" title="Ajustes">
               <Settings className="w-4 h-4" />
             </button>

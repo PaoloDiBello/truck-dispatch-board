@@ -8,7 +8,6 @@ async function fetchSuggestions(query, apiKey) {
   const key = `${apiKey}:${query.trim().toLowerCase()}`;
   if (cache[key]) return cache[key];
 
-  // Try ORS geocoding first (better quality, truck-aware)
   if (apiKey) {
     try {
       const res = await fetch(
@@ -19,10 +18,14 @@ async function fetchSuggestions(query, apiKey) {
       if (data.features?.length) {
         const results = data.features.map(f => {
           const p = f.properties;
-          const postal = p.postalcode || p.postcode || '';
-          const city = p.locality || p.name || p.label.split(',')[0];
-          const short = postal ? `${city} · ${postal}` : city;
-          return { label: p.label, short };
+          const isPostal = p.layer === 'postalcode';
+          // postalcode layer: name IS the postal code, locality is the city
+          const postal = isPostal ? p.name : (p.postalcode || p.postcode || '');
+          const city = isPostal
+            ? (p.locality || p.label.split(',')[1]?.trim() || p.label.split(',')[0])
+            : (p.locality || p.name || p.label.split(',')[0]);
+          const display = postal ? `${city} · ${postal}` : city;
+          return { label: p.label, short: city, display };
         });
         cache[key] = results;
         return results;
@@ -30,17 +33,20 @@ async function fetchSuggestions(query, apiKey) {
     } catch { /* fall through */ }
   }
 
-  // Fallback: Nominatim
+  // Fallback: Nominatim (always has postcodes via address fields)
   try {
     const res = await fetch(
       `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&addressdetails=1`,
       { headers: { 'Accept-Language': 'es' } }
     );
     const data = await res.json();
-    const results = data.map(r => ({
-      label: r.display_name,
-      short: r.name || r.display_name.split(',')[0],
-    }));
+    const results = data.map(r => {
+      const postal = r.address?.postcode || '';
+      const city = r.address?.city || r.address?.town || r.address?.village ||
+                   r.address?.municipality || r.name || r.display_name.split(',')[0];
+      const display = postal ? `${city} · ${postal}` : city;
+      return { label: r.display_name, short: city, display };
+    });
     cache[key] = results;
     return results;
   } catch {
@@ -49,18 +55,16 @@ async function fetchSuggestions(query, apiKey) {
 }
 
 export function AddressInput({ value, onChange, placeholder, apiKey, icon, className = '', fullAddress = false }) {
-  const [query, setQuery]           = useState(value || '');
+  const [query, setQuery]             = useState(value || '');
   const [suggestions, setSuggestions] = useState([]);
-  const [open, setOpen]             = useState(false);
-  const [loading, setLoading]       = useState(false);
-  const [activeIdx, setActiveIdx]   = useState(-1);
-  const debounceRef = useRef(null);
+  const [open, setOpen]               = useState(false);
+  const [loading, setLoading]         = useState(false);
+  const [activeIdx, setActiveIdx]     = useState(-1);
+  const debounceRef  = useRef(null);
   const containerRef = useRef(null);
 
-  // Sync if parent value changes externally
   useEffect(() => { setQuery(value || ''); }, [value]);
 
-  // Close on outside click
   useEffect(() => {
     const handler = (e) => { if (containerRef.current && !containerRef.current.contains(e.target)) setOpen(false); };
     document.addEventListener('mousedown', handler);
@@ -128,8 +132,8 @@ export function AddressInput({ value, onChange, placeholder, apiKey, icon, class
               >
                 <MapPin className="w-3.5 h-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
                 <div className="min-w-0">
-                  <div className="text-sm font-medium text-slate-800 truncate">{s.short}</div>
-                  {s.label !== s.short && (
+                  <div className="text-sm font-medium text-slate-800 truncate">{s.display}</div>
+                  {s.label !== s.display && (
                     <div className="text-xs text-slate-400 truncate">{s.label}</div>
                   )}
                 </div>

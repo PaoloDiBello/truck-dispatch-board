@@ -72,7 +72,7 @@ export function CellEditor({ date, data, apiKey, savedTags, onSave, onClear, onC
 
   const onSubmit = (d) => {
     onSave({
-      title:   d.title.trim(),
+      title:   (d.title || '').trim(),
       routes:  d.routes.filter(r => r.origin || r.destination),
       notes:   d.notes,
       tags:    d.tags,
