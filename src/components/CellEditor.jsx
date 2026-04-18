@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
+import { AddressInput } from './AddressInput';
 import {
   Plus, Trash2, X, Clock, MapPin, Euro, Package, Phone, Building2,
   Truck, Calendar, Edit2, AlertCircle, ArrowRight, Calculator,
@@ -174,15 +175,23 @@ export function CellEditor({ date, data, apiKey, savedTags, onSave, onClear, onC
                       <div className="p-4 space-y-4">
                         {/* Origin → Destination */}
                         <div className="flex items-center gap-2">
-                          <div className="flex-1 relative">
-                            <input {...register(`routes.${i}.origin`)} placeholder="Origen" className="w-full px-3 py-2.5 pr-8 text-sm font-medium border border-slate-200 rounded-lg focus:border-blue-400 focus:ring-2 focus:ring-blue-100 focus:outline-none transition" />
-                            <MapPin className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-300 pointer-events-none" />
-                          </div>
+                          <AddressInput
+                            className="flex-1"
+                            value={r.origin || ''}
+                            onChange={(val) => setValue(`routes.${i}.origin`, val)}
+                            placeholder="Origen"
+                            apiKey={apiKey}
+                            icon={<MapPin className="w-3.5 h-3.5" />}
+                          />
                           <ArrowRight className="w-4 h-4 text-slate-300 flex-shrink-0" />
-                          <div className="flex-1 relative">
-                            <input {...register(`routes.${i}.destination`)} placeholder="Destino" className="w-full px-3 py-2.5 pr-8 text-sm font-medium border border-slate-200 rounded-lg focus:border-blue-400 focus:ring-2 focus:ring-blue-100 focus:outline-none transition" />
-                            <Navigation className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-300 pointer-events-none" />
-                          </div>
+                          <AddressInput
+                            className="flex-1"
+                            value={r.destination || ''}
+                            onChange={(val) => setValue(`routes.${i}.destination`, val)}
+                            placeholder="Destino"
+                            apiKey={apiKey}
+                            icon={<Navigation className="w-3.5 h-3.5" />}
+                          />
                         </div>
 
                         {/* Salida / Llegada columns */}
