@@ -1,3 +1,5 @@
+import { forwardRef } from 'react';
+
 export const inputCls = 'w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 transition';
 
 export function Field({ label, children }) {
@@ -9,17 +11,18 @@ export function Field({ label, children }) {
   );
 }
 
-export function IconInput({ icon, iconColor = 'text-slate-400', className = '', ...props }) {
+export const IconInput = forwardRef(function IconInput({ icon, iconColor = 'text-slate-400', className = '', ...props }, ref) {
   return (
     <div className="relative flex items-center">
       <span className={`absolute left-3 flex-shrink-0 pointer-events-none ${iconColor}`}>{icon}</span>
       <input
+        ref={ref}
         className={`w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 transition ${className}`}
         {...props}
       />
     </div>
   );
-}
+});
 
 export function SectionLabel({ icon, label, note }) {
   return (
