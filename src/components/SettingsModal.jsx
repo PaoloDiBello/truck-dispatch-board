@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { Settings, X, Key, Plus, Trash2, Check } from 'lucide-react';
-import { TAG_COLORS, COLOR_CYCLE } from '../constants';
+import { Settings, X, Key, Plus, Trash2, Check, Truck, Package, CalendarDays } from 'lucide-react';
+import { TAG_COLORS, COLOR_CYCLE, TAG_CATEGORIES, TAG_CATEGORY_KEYS } from '../constants';
 import { uid } from '../utils';
 import { inputCls } from './primitives';
 
+const CAT_ICONS = { vehiculo: Truck, ruta: Package, dia: CalendarDays };
+
 export function SettingsModal({ apiKey, savedTags, onSaveTags, onSave, onClose }) {
   const { register, handleSubmit } = useForm({ defaultValues: { apiKey } });
-  const [tab, setTab] = useState('api');
+  const [tab, setTab] = useState('tags');
 
   return (
     <div className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
@@ -22,9 +24,8 @@ export function SettingsModal({ apiKey, savedTags, onSaveTags, onSave, onClose }
           <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"><X className="w-5 h-5" /></button>
         </header>
 
-        {/* Tabs */}
         <div className="flex border-b border-slate-200 px-6 flex-shrink-0">
-          {[['api', 'API'], ['tags', 'Etiquetas']].map(([key, label]) => (
+          {[['tags', 'Etiquetas'], ['api', 'API']].map(([key, label]) => (
             <button key={key} onClick={() => setTab(key)}
               className={`px-4 py-3 text-sm font-semibold border-b-2 transition-colors -mb-px ${tab === key ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
               {label}
@@ -63,81 +64,129 @@ export function SettingsModal({ apiKey, savedTags, onSaveTags, onSave, onClose }
 }
 
 function TagManager({ savedTags, onSaveTags }) {
-  const [tags, setTags]       = useState(savedTags);
+  const [tags, setTags]         = useState(savedTags);
   const [newLabel, setNewLabel] = useState('');
   const [newColor, setNewColor] = useState('blue');
+  const [newCategory, setNewCategory] = useState('ruta');
   const [editingId, setEditingId] = useState(null);
   const [editLabel, setEditLabel] = useState('');
+
+  const byCategory = (cat) => tags.filter(t => (t.category || 'ruta') === cat);
 
   const add = () => {
     const label = newLabel.trim();
     if (!label) return;
-    setTags(p => [...p, { id: uid(), label, color: newColor, position: p.length }]);
+    setTags(p => [...p, { id: uid(), label, color: newColor, category: newCategory, position: p.length }]);
     setNewLabel('');
-    setNewColor('blue');
   };
 
-  const remove = (id) => setTags(p => p.filter(t => t.id !== id));
-
+  const remove    = (id) => setTags(p => p.filter(t => t.id !== id));
   const startEdit = (tag) => { setEditingId(tag.id); setEditLabel(tag.label); };
   const saveEdit  = (id) => {
     const label = editLabel.trim();
     if (label) setTags(p => p.map(t => t.id === id ? { ...t, label } : t));
     setEditingId(null);
   };
+  const setColor    = (id, col) => setTags(p => p.map(t => t.id === id ? { ...t, color: col } : t));
+  const setCategory = (id, cat) => setTags(p => p.map(t => t.id === id ? { ...t, category: cat } : t));
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-2">
-        {tags.length === 0 && <p className="text-sm text-slate-400 italic">Sin etiquetas. Crea la primera abajo.</p>}
-        {tags.map(tag => {
-          const c = TAG_COLORS[tag.color] || TAG_COLORS.slate;
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
+        <p className="text-xs text-slate-400 leading-relaxed">
+          Organiza las etiquetas en categorías para encontrarlas más fácilmente al añadir rutas o anotaciones de día.
+        </p>
+
+        {TAG_CATEGORY_KEYS.map(cat => {
+          const cfg  = TAG_CATEGORIES[cat];
+          const Icon = CAT_ICONS[cat];
+          const list = byCategory(cat);
           return (
-            <div key={tag.id} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
-              <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${c.bg}`} />
-              {editingId === tag.id ? (
-                <input
-                  autoFocus value={editLabel}
-                  onChange={e => setEditLabel(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') saveEdit(tag.id); if (e.key === 'Escape') setEditingId(null); }}
-                  onBlur={() => saveEdit(tag.id)}
-                  className="flex-1 text-sm bg-white border border-blue-300 rounded-lg px-2 py-1 outline-none"
-                />
-              ) : (
-                <span className="flex-1 text-sm font-medium text-slate-700 cursor-pointer" onDoubleClick={() => startEdit(tag)}>
-                  {tag.label}
-                </span>
-              )}
-              <div className="flex items-center gap-1">
-                {COLOR_CYCLE.map(col => (
-                  <button key={col} type="button"
-                    onClick={() => setTags(p => p.map(t => t.id === tag.id ? { ...t, color: col } : t))}
-                    className={`w-4 h-4 rounded-full ${TAG_COLORS[col].bg} transition-transform ${tag.color === col ? 'scale-125 ring-2 ring-offset-1 ring-slate-300' : 'hover:scale-110 opacity-50 hover:opacity-100'}`}
-                  />
-                ))}
+            <div key={cat}>
+              <div className="flex items-center gap-2 mb-2">
+                <Icon className="w-3.5 h-3.5 text-slate-500" />
+                <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">{cfg.label}</span>
+                <span className="text-[10px] text-slate-400">— {cfg.hint}</span>
+                {list.length > 0 && <span className="ml-auto text-[10px] text-slate-400">{list.length}</span>}
               </div>
-              <button onClick={() => remove(tag.id)} className="p-1 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-500 transition flex-shrink-0">
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
+              <div className="space-y-1.5">
+                {list.length === 0 && (
+                  <p className="text-xs text-slate-300 italic pl-1">Sin etiquetas en esta categoría</p>
+                )}
+                {list.map(tag => {
+                  const c = TAG_COLORS[tag.color] || TAG_COLORS.slate;
+                  return (
+                    <div key={tag.id} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                      <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${c.bg}`} />
+                      {editingId === tag.id ? (
+                        <input autoFocus value={editLabel}
+                          onChange={e => setEditLabel(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') saveEdit(tag.id); if (e.key === 'Escape') setEditingId(null); }}
+                          onBlur={() => saveEdit(tag.id)}
+                          className="flex-1 text-sm bg-white border border-blue-300 rounded-lg px-2 py-1 outline-none" />
+                      ) : (
+                        <span className="flex-1 text-sm font-medium text-slate-700 cursor-pointer" onDoubleClick={() => startEdit(tag)}>
+                          {tag.label}
+                        </span>
+                      )}
+
+                      {/* Category switcher */}
+                      <div className="flex items-center gap-0.5">
+                        {TAG_CATEGORY_KEYS.map(c2 => {
+                          const I2 = CAT_ICONS[c2];
+                          return (
+                            <button key={c2} type="button" title={TAG_CATEGORIES[c2].label}
+                              onClick={() => setCategory(tag.id, c2)}
+                              className={`p-1 rounded transition ${(tag.category || 'ruta') === c2 ? 'bg-blue-100 text-blue-600' : 'text-slate-300 hover:text-slate-500'}`}>
+                              <I2 className="w-3 h-3" />
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Color swatches */}
+                      <div className="flex items-center gap-0.5">
+                        {COLOR_CYCLE.map(col => (
+                          <button key={col} type="button" onClick={() => setColor(tag.id, col)}
+                            className={`w-3.5 h-3.5 rounded-full ${TAG_COLORS[col].bg} transition-transform ${tag.color === col ? 'scale-125 ring-2 ring-offset-1 ring-slate-300' : 'opacity-40 hover:opacity-100'}`} />
+                        ))}
+                      </div>
+
+                      <button onClick={() => remove(tag.id)} className="p-1 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-500 transition flex-shrink-0">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           );
         })}
       </div>
 
       {/* Add new tag */}
-      <div className="px-6 py-3 border-t border-slate-100 bg-slate-50 flex-shrink-0">
+      <div className="px-6 py-3 border-t border-slate-100 bg-slate-50 flex-shrink-0 space-y-2">
+        {/* Category selector */}
+        <div className="flex gap-1">
+          {TAG_CATEGORY_KEYS.map(cat => {
+            const Icon = CAT_ICONS[cat];
+            return (
+              <button key={cat} type="button" onClick={() => setNewCategory(cat)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${newCategory === cat ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>
+                <Icon className="w-3 h-3" />{TAG_CATEGORIES[cat].label}
+              </button>
+            );
+          })}
+        </div>
         <div className="flex items-center gap-2">
-          <input
-            value={newLabel} onChange={e => setNewLabel(e.target.value)}
+          <input value={newLabel} onChange={e => setNewLabel(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && add()}
-            placeholder="Nueva etiqueta…"
-            className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:border-blue-400 focus:outline-none bg-white"
-          />
-          <div className="flex items-center gap-1">
+            placeholder={`Nueva etiqueta de ${TAG_CATEGORIES[newCategory].label.toLowerCase()}…`}
+            className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:border-blue-400 focus:outline-none bg-white" />
+          <div className="flex items-center gap-0.5">
             {COLOR_CYCLE.map(col => (
               <button key={col} type="button" onClick={() => setNewColor(col)}
-                className={`w-4 h-4 rounded-full flex-shrink-0 ${TAG_COLORS[col].bg} transition-transform ${newColor === col ? 'scale-125 ring-2 ring-offset-1 ring-slate-300' : 'hover:scale-110 opacity-50 hover:opacity-100'}`}
-              />
+                className={`w-4 h-4 rounded-full flex-shrink-0 ${TAG_COLORS[col].bg} transition-transform ${newColor === col ? 'scale-125 ring-2 ring-offset-1 ring-slate-300' : 'opacity-40 hover:opacity-100'}`} />
             ))}
           </div>
           <button onClick={add} disabled={!newLabel.trim()} className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 transition flex-shrink-0">

@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Plus, Settings, X, Clock, Truck, Calendar, AlertCircle, CheckCircle2,
-  ChevronLeft, ChevronRight, Bell, User, Search, Gauge, MapPin,
+  Plus, Settings, X, Truck, Calendar, AlertCircle, CheckCircle2,
+  ChevronLeft, ChevronRight, Bell, User, Search, MousePointerClick,
 } from 'lucide-react';
 import { CellEditor } from './components/CellEditor';
+import { OpsBar } from './components/OpsBar';
 import { CellContent } from './components/CellContent';
 import { TrucksModal } from './components/TrucksModal';
 import { SettingsModal } from './components/SettingsModal';
@@ -12,23 +13,23 @@ import { DAYS_ES, DEFAULT_TAGS, DEFAULT_VEHICLES } from './constants';
 import { uid, formatDateFull, getWeekDates, toISODate, isSameDay } from './utils';
 import {
   fetchVehicles, insertVehicle, updateVehicle as dbUpdateVehicle, deleteVehicle as dbDeleteVehicle,
-  fetchCells, upsertCell, deleteCellsForVehicle,
+  fetchRoutes, insertRoute, updateRoute as dbUpdateRoute, deleteRoute as dbDeleteRoute, deleteRoutesForVehicle,
+  fetchDayNotes, upsertDayNote, deleteDayNotesForVehicle,
   fetchTags, insertTag, deleteTag as dbDeleteTag,
   fetchSetting, upsertSetting,
 } from './lib/db';
 
 export default function App() {
   const [vehicles, setVehicles]           = useState([]);
-  const [cells, setCells]                 = useState({});
+  const [routes, setRoutes]               = useState([]);
+  const [dayNotes, setDayNotes]           = useState({});
   const [savedTags, setSavedTags]         = useState(DEFAULT_TAGS);
   const [weekOffset, setWeekOffset]       = useState(0);
   const [includeSaturday, setSat]         = useState(false);
   const [apiKey, setApiKey]               = useState('');
-  const [editingCell, setEditingCell]     = useState(null);
+  const [dayPanel, setDayPanel]           = useState(null); // { vehicleId, date }
   const [showSettings, setShowSettings]   = useState(false);
   const [showTrucks, setShowTrucks]       = useState(false);
-  const [hoveredCell, setHoveredCell]     = useState(null);
-  const [tooltipPos, setTooltipPos]       = useState({ x: 0, y: 0 });
   const [notifications, setNotifications] = useState([]);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [loading, setLoading]             = useState(true);
@@ -36,6 +37,7 @@ export default function App() {
   const [toast, setToast]                 = useState(null);
   const [filterText, setFilterText]       = useState('');
   const [dbError, setDbError]             = useState(null);
+  const notifiedIds = useRef(new Set());
 
   const weekDates = getWeekDates(weekOffset, includeSaturday);
 
@@ -50,26 +52,26 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        const [vs, cs, tgs, key, sat] = await Promise.all([
+        const [vs, rs, dn, tgs, key, sat] = await Promise.all([
           fetchVehicles(),
-          fetchCells(),
+          fetchRoutes(),
+          fetchDayNotes(),
           fetchTags(),
           fetchSetting('apiKey'),
           fetchSetting('includeSaturday'),
         ]);
         setVehicles(vs.length ? vs : DEFAULT_VEHICLES.map(v => ({ ...v })));
-        setCells(cs);
-        setSavedTags(tgs.length ? tgs : DEFAULT_TAGS);
+        setRoutes(rs);
+        setDayNotes(dn);
         setApiKey(key || import.meta.env.VITE_ORS_KEY || '');
         if (sat) setSat(sat === 'true');
-        // Seed default vehicles if none exist
-        if (!vs.length) {
-          await Promise.all(DEFAULT_VEHICLES.map(v => insertVehicle(v)));
-        }
-        // Seed default tags if none exist
-        if (!tgs.length) {
-          await Promise.all(DEFAULT_TAGS.map(t => insertTag(t)));
-        }
+        if (!vs.length) await Promise.all(DEFAULT_VEHICLES.map(v => insertVehicle(v)));
+        // Always upsert default tags (ignoreDuplicates=true) so new defaults get added without overwriting user edits
+        const existingIds = new Set(tgs.map(t => t.id));
+        const missing = DEFAULT_TAGS.filter(t => !existingIds.has(t.id));
+        if (missing.length) await Promise.all(missing.map(t => insertTag(t)));
+        const finalTags = tgs.length ? [...tgs, ...missing] : DEFAULT_TAGS;
+        setSavedTags(finalTags);
       } catch (err) {
         console.error('Supabase load error:', err);
         setDbError(err.message);
@@ -80,8 +82,8 @@ export default function App() {
   }, []);
 
   // ── ARRIVAL NOTIFICATIONS ───────────────────────────────────────────────────
-  const dismissNotif = (id) => setNotifications(p => p.filter(n => n.id !== id));
-  const dismissAllNotifs = () => setNotifications([]);
+  const dismissNotif    = (id) => setNotifications(p => p.filter(n => n.id !== id));
+  const dismissAllNotifs = ()  => setNotifications([]);
 
   useEffect(() => {
     const tick = setInterval(() => {
@@ -89,31 +91,31 @@ export default function App() {
       const currentTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
       const today = toISODate(now);
       const newNotifs = [];
-      Object.entries(cells).forEach(([key, cell]) => {
-        cell.routes?.forEach(r => {
-          if (r.arrivalDate === today && r.arrivalTime <= currentTime && !r._notified && r.origin && r.destination) {
-            const vehicle = vehicles.find(v => v.id === key.split('_')[0]);
-            const notif = {
-              id: `${key}_${r.origin}_${r.arrivalTime}`,
-              vehicleId: key.split('_')[0],
-              vehicle: vehicle?.plate || 'Camión',
-              driver: vehicle?.driver || '',
-              route: `${r.origin} → ${r.destination}`,
-              time: r.arrivalTime,
-            };
-            newNotifs.push(notif);
-            if ('Notification' in window && Notification.permission === 'granted') {
-              new Notification(`Llegada estimada · ${notif.vehicle}`, {
-                body: `${notif.route}\nHora prevista: ${notif.time}${notif.driver ? ` · ${notif.driver}` : ''}`,
-                icon: '/favicon.ico',
-              });
-            }
-            setCells(prev => ({
-              ...prev,
-              [key]: { ...prev[key], routes: prev[key].routes.map(rt => rt === r ? { ...rt, _notified: true } : rt) },
-            }));
+      routes.forEach(r => {
+        if (
+          r.arrival_date === today &&
+          r.arrival_time <= currentTime &&
+          !notifiedIds.current.has(r.id) &&
+          r.origin && r.destination
+        ) {
+          notifiedIds.current.add(r.id);
+          const vehicle = vehicles.find(v => v.id === r.vehicle_id);
+          const notif = {
+            id: r.id,
+            vehicleId: r.vehicle_id,
+            vehicle: vehicle?.plate || 'Camión',
+            driver: vehicle?.driver || '',
+            route: `${r.origin} → ${r.destination}`,
+            time: r.arrival_time,
+          };
+          newNotifs.push(notif);
+          if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification(`Llegada estimada · ${notif.vehicle}`, {
+              body: `${notif.route}\nHora prevista: ${notif.time}${notif.driver ? ` · ${notif.driver}` : ''}`,
+              icon: '/favicon.ico',
+            });
           }
-        });
+        }
       });
       if (newNotifs.length > 0) {
         setNotifications(p => [...p, ...newNotifs]);
@@ -121,7 +123,7 @@ export default function App() {
       }
     }, 30000);
     return () => clearInterval(tick);
-  }, [cells, vehicles]);
+  }, [routes, vehicles]);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
 
@@ -144,26 +146,23 @@ export default function App() {
 
   const deleteVehicle = (id) => {
     const v = vehicles.find(x => x.id === id);
-    const assignedKeys = Object.keys(cells).filter(k => k.startsWith(id + '_') &&
-      (cells[k].routes?.length || cells[k].notes || cells[k].tags?.length));
-    const recordCount = assignedKeys.length;
-    const routeCount  = assignedKeys.reduce((s, k) => s + (cells[k].routes?.length || 0), 0);
-    const detail = recordCount > 0
-      ? `Este camión tiene ${recordCount} día${recordCount !== 1 ? 's' : ''} con datos (${routeCount} ruta${routeCount !== 1 ? 's' : ''}). Todo se eliminará.`
-      : 'Este camión no tiene datos asignados.';
-
+    const routeCount = routes.filter(r => r.vehicle_id === id).length;
+    const detail = routeCount > 0
+      ? `Este camión tiene ${routeCount} ruta${routeCount !== 1 ? 's' : ''}. Todo se eliminará.`
+      : 'Este camión no tiene rutas asignadas.';
     setConfirmDialog({
       title: 'Eliminar camión',
       message: `¿Eliminar "${v?.plate || 'este camión'}"?\n\n${detail}`,
       confirmLabel: 'Sí, eliminar',
       danger: true,
       onConfirm: async () => {
-        await dbDeleteVehicle(id); // cascades cells via FK
+        await dbDeleteVehicle(id);
         setVehicles(p => p.filter(x => x.id !== id));
-        setCells(p => {
-          const nc = { ...p };
-          Object.keys(nc).filter(k => k.startsWith(id + '_')).forEach(k => delete nc[k]);
-          return nc;
+        setRoutes(p => p.filter(r => r.vehicle_id !== id));
+        setDayNotes(p => {
+          const n = { ...p };
+          Object.keys(n).filter(k => k.startsWith(id + '_')).forEach(k => delete n[k]);
+          return n;
         });
         setConfirmDialog(null);
         showToast('Camión eliminado');
@@ -171,58 +170,95 @@ export default function App() {
     });
   };
 
-  // ── CELLS ───────────────────────────────────────────────────────────────────
-  const getCell = useCallback((vehicleId, date) =>
-    cells[`${vehicleId}_${toISODate(date)}`] || { title: '', routes: [], notes: '', tags: [], company: {} },
-  [cells]);
-
-  const saveCell = async (vehicleId, date, data) => {
-    const dateStr = toISODate(date);
-    await upsertCell(vehicleId, dateStr, data);
-    setCells(prev => ({ ...prev, [`${vehicleId}_${dateStr}`]: data }));
-    showToast('Guardado');
+  // ── ROUTES ──────────────────────────────────────────────────────────────────
+  const addRoute = async (vehicleId, routeData) => {
+    const route = { id: uid(), vehicle_id: vehicleId, ...routeData };
+    const saved = await insertRoute(route);
+    setRoutes(p => [...p, saved]);
+    return saved;
   };
 
-  const clearAllCells = async (vehicleId, plate) => {
-    const daysWithData = Object.keys(cells).filter(k => k.startsWith(vehicleId + '_')).length;
+  const updateRouteById = async (id, updates) => {
+    const saved = await dbUpdateRoute(id, updates);
+    setRoutes(p => p.map(r => r.id === id ? saved : r));
+    return saved;
+  };
+
+  const deleteRouteById = async (id) => {
+    await dbDeleteRoute(id);
+    setRoutes(p => p.filter(r => r.id !== id));
+  };
+
+  const clearAllForVehicle = (vehicleId, plate) => {
+    const routeCount = routes.filter(r => r.vehicle_id === vehicleId).length;
+    const dnCount = Object.keys(dayNotes).filter(k => k.startsWith(vehicleId + '_')).length;
+    const detail = routeCount > 0 || dnCount > 0
+      ? `${routeCount} ruta${routeCount !== 1 ? 's' : ''} y ${dnCount} nota${dnCount !== 1 ? 's' : ''} de día.`
+      : 'Sin datos asignados.';
     setConfirmDialog({
       title: 'Borrar todo',
-      message: `¿Eliminar TODOS los datos de ${plate} de todas las semanas?${daysWithData > 0 ? ` (${daysWithData} día${daysWithData !== 1 ? 's' : ''} con datos)` : ''} Esta acción no se puede deshacer.`,
+      message: `¿Eliminar TODOS los datos de ${plate} de todas las semanas?\n\n${detail}\n\nEsta acción no se puede deshacer.`,
       confirmLabel: 'Sí, borrar todo',
       danger: true,
       onConfirm: async () => {
-        await deleteCellsForVehicle(vehicleId);
-        setCells(prev => {
-          const nc = { ...prev };
-          Object.keys(nc).filter(k => k.startsWith(vehicleId + '_')).forEach(k => delete nc[k]);
-          return nc;
+        await Promise.all([deleteRoutesForVehicle(vehicleId), deleteDayNotesForVehicle(vehicleId)]);
+        setRoutes(p => p.filter(r => r.vehicle_id !== vehicleId));
+        setDayNotes(p => {
+          const n = { ...p };
+          Object.keys(n).filter(k => k.startsWith(vehicleId + '_')).forEach(k => delete n[k]);
+          return n;
         });
-        setEditingCell(null);
+        setDayPanel(null);
         setConfirmDialog(null);
         showToast('Datos borrados');
       },
     });
   };
 
-  const getSpanningRoutes = useCallback((vehicleId, date) => {
+  const clearDayForVehicle = (vehicleId, date) => {
     const dateStr = toISODate(date);
-    const result = [];
-    for (let i = 1; i <= 14; i++) {
-      const d = new Date(date);
-      d.setDate(d.getDate() - i);
-      const cell = cells[`${vehicleId}_${toISODate(d)}`];
-      if (!cell?.routes) continue;
-      for (const r of cell.routes) {
-        if (!r.departureDate || !r.arrivalDate) continue;
-        if (r.departureDate < dateStr && r.arrivalDate >= dateStr) {
-          result.push({ ...r, _spanType: r.arrivalDate === dateStr ? 'arrival' : 'transit' });
-        }
-      }
-    }
-    return result;
-  }, [cells]);
+    const dayRoutes = routes.filter(r => r.vehicle_id === vehicleId && r.departure_date === dateStr);
+    const hasDayNote = !!dayNotes[`${vehicleId}_${dateStr}`];
+    if (dayRoutes.length === 0 && !hasDayNote) return;
+    setConfirmDialog({
+      title: 'Borrar datos de este día',
+      message: `¿Eliminar las ${dayRoutes.length} ruta${dayRoutes.length !== 1 ? 's' : ''} que salen este día y la nota del día? El historial del camión en otras fechas no se verá afectado.`,
+      confirmLabel: 'Sí, borrar este día',
+      danger: true,
+      onConfirm: async () => {
+        await Promise.all(dayRoutes.map(r => dbDeleteRoute(r.id)));
+        if (hasDayNote) await upsertDayNote(vehicleId, dateStr, '', []);
+        setRoutes(p => p.filter(r => !(r.vehicle_id === vehicleId && r.departure_date === dateStr)));
+        setDayNotes(p => { const n = { ...p }; delete n[`${vehicleId}_${dateStr}`]; return n; });
+        setConfirmDialog(null);
+        showToast('Datos del día borrados');
+      },
+    });
+  };
 
-  // ── TAGS ────────────────────────────────────────────────────────────────────
+  // ── DAY NOTES ────────────────────────────────────────────────────────────────
+  const saveDayNote = async (vehicleId, date, notes, tags) => {
+    const dateStr = toISODate(date);
+    await upsertDayNote(vehicleId, dateStr, notes, tags);
+    setDayNotes(prev => ({ ...prev, [`${vehicleId}_${dateStr}`]: { notes, tags } }));
+    showToast('Notas guardadas');
+  };
+
+  // ── DERIVED GETTERS ──────────────────────────────────────────────────────────
+  const getRoutesForDay = useCallback((vehicleId, date) => {
+    const dateStr = toISODate(date);
+    const departing = routes.filter(r => r.vehicle_id === vehicleId && r.departure_date === dateStr);
+    const spanning  = routes
+      .filter(r => r.vehicle_id === vehicleId && r.departure_date < dateStr && r.arrival_date >= dateStr)
+      .map(r => ({ ...r, _spanType: r.arrival_date === dateStr ? 'arrival' : 'transit' }));
+    return { departing, spanning };
+  }, [routes]);
+
+  const getDayNote = useCallback((vehicleId, date) =>
+    dayNotes[`${vehicleId}_${toISODate(date)}`] || { notes: '', tags: [] },
+  [dayNotes]);
+
+  // ── TAGS ─────────────────────────────────────────────────────────────────────
   const addTag = async (newTag) => {
     await insertTag({ ...newTag, position: savedTags.length });
     setSavedTags(p => [...p, newTag]);
@@ -234,14 +270,13 @@ export default function App() {
   };
 
   const saveTags = async (tags) => {
-    // Delete all then re-insert with new positions
     await Promise.all(savedTags.map(t => dbDeleteTag(t.id)));
     await Promise.all(tags.map((t, i) => insertTag({ ...t, position: i })));
     setSavedTags(tags);
     showToast('Etiquetas guardadas');
   };
 
-  // ── SETTINGS ────────────────────────────────────────────────────────────────
+  // ── SETTINGS ─────────────────────────────────────────────────────────────────
   const saveApiKey = async (key) => {
     await upsertSetting('apiKey', key);
     setApiKey(key);
@@ -259,7 +294,7 @@ export default function App() {
     return v.plate.toLowerCase().includes(t) || (v.driver || '').toLowerCase().includes(t);
   });
 
-  // ── RENDER ──────────────────────────────────────────────────────────────────
+  // ── RENDER ───────────────────────────────────────────────────────────────────
   if (loading) return (
     <div className="flex items-center justify-center h-screen bg-slate-100">
       <div className="flex items-center gap-3 text-slate-500">
@@ -273,11 +308,9 @@ export default function App() {
       <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center space-y-4">
         <AlertCircle className="w-12 h-12 text-red-500 mx-auto" />
         <div className="font-bold text-slate-900 text-lg">Error de conexión</div>
-        <p className="text-sm text-slate-500">No se pudo conectar con la base de datos. Comprueba que el schema de Supabase esté creado.</p>
+        <p className="text-sm text-slate-500">No se pudo conectar con la base de datos.</p>
         <code className="block text-xs bg-red-50 text-red-700 p-3 rounded-lg text-left break-all">{dbError}</code>
-        <button onClick={() => window.location.reload()} className="px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition">
-          Reintentar
-        </button>
+        <button onClick={() => window.location.reload()} className="px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition">Reintentar</button>
       </div>
     </div>
   );
@@ -308,16 +341,10 @@ export default function App() {
               className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg hover:border-blue-400 hover:text-blue-600 text-sm font-medium transition">
               <Truck className="w-4 h-4" /><span className="hidden sm:inline">Gestionar flota</span>
             </button>
+            {/* Test notification + badge */}
             <button
-              onClick={() => {
-                const mock = { id: `mock_${Date.now()}`, vehicleId: null, vehicle: 'TEST-123', driver: 'Conductor', route: 'Madrid → Barcelona', time: new Date().toTimeString().slice(0,5) };
-                setNotifications(p => [...p, mock]);
-                setShowNotifPanel(true);
-                if ('Notification' in window && Notification.permission === 'granted') {
-                  new Notification(`Llegada estimada · ${mock.vehicle}`, { body: `${mock.route}\nHora prevista: ${mock.time} · ${mock.driver}`, icon: '/favicon.ico' });
-                }
-              }}
-              className="relative p-2 hover:bg-slate-100 rounded-lg transition text-slate-400 hover:text-amber-500" title="Test notificación / ver alertas">
+              onClick={() => setShowNotifPanel(p => !p)}
+              className="relative p-2 hover:bg-slate-100 rounded-lg transition text-slate-400 hover:text-amber-500" title="Notificaciones">
               <Bell className="w-4 h-4" />
               {notifications.length > 0 && (
                 <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center leading-none">
@@ -359,6 +386,16 @@ export default function App() {
         </div>
       </header>
 
+      {/* OPS BAR */}
+      <OpsBar
+        routes={routes}
+        vehicles={vehicles}
+        onCellOpen={(vehicleId, dateStr) => {
+          const date = new Date(dateStr + 'T00:00:00');
+          setDayPanel({ vehicleId, date });
+        }}
+      />
+
       {/* GRID */}
       <div className="flex-1 overflow-auto">
         <table className="border-collapse" style={{ minWidth: `${220 + weekDates.length * 200}px`, width: '100%' }}>
@@ -399,28 +436,48 @@ export default function App() {
                       <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5 truncate">
                         {v.driver ? <><User className="w-3 h-3 text-slate-400 flex-shrink-0" />{v.driver}</> : <span className="italic text-slate-400">Sin conductor</span>}
                       </div>
+                      {(() => { const n = routes.filter(r => r.vehicle_id === v.id).length; return n > 0
+                        ? <div className="text-[10px] text-slate-400 mt-0.5">{n} ruta{n !== 1 ? 's' : ''} en total</div>
+                        : <div className="text-[10px] text-blue-400 mt-0.5 font-medium flex items-center gap-0.5"><MousePointerClick className="w-3 h-3" /> Pulsa un día para empezar</div>;
+                      })()}
                     </div>
                   </div>
                 </td>
                 {weekDates.map((d, di) => {
-                  const cell     = getCell(v.id, d);
-                  const spanning = getSpanningRoutes(v.id, d);
-                  const cellKey  = `${v.id}_${toISODate(d)}`;
-                  const isToday  = isSameDay(d, new Date());
-                  const hasContent = cell.routes?.length || cell.tags?.length || cell.notes || spanning.length || cell.title;
+                  const { departing, spanning } = getRoutesForDay(v.id, d);
+                  const dayNote = getDayNote(v.id, d);
+                  const isToday = isSameDay(d, new Date());
+                  const hasContent = departing.length > 0 || spanning.length > 0 || dayNote.notes || dayNote.tags?.length > 0;
+                  const vehicleHasAnyRoutes = routes.some(r => r.vehicle_id === v.id);
                   return (
                     <td key={di}
-                      onClick={() => setEditingCell({ vehicleId: v.id, date: d, data: cell })}
-                      className={`border-b border-r border-slate-200 p-2 align-top cursor-pointer transition-colors relative group/cell ${isToday ? 'bg-blue-50/40 hover:bg-blue-50/70' : 'bg-white hover:bg-slate-50'}`}
-                      style={{ height: '120px' }}>
+                      onClick={() => setDayPanel({ vehicleId: v.id, date: d })}
+                      className={`border-b border-r border-slate-200 p-2.5 align-top cursor-pointer transition-all relative group/cell ${isToday ? 'bg-blue-50/40 hover:bg-blue-50/80' : 'bg-white hover:bg-slate-50'}`}
+                      style={{ minHeight: '90px' }}>
                       {hasContent
-                        ? <CellContent cell={cell} spanning={spanning} date={d} savedTags={savedTags} />
-                        : <div className="h-full flex items-center justify-center">
-                            <span className="text-xs text-slate-300 group-hover/cell:text-slate-400 flex items-center gap-1 transition-colors">
-                              <Plus className="w-3 h-3" /> Añadir
+                        ? <CellContent departing={departing} spanning={spanning} dayNote={dayNote} savedTags={savedTags} />
+                        : (
+                          <div className="h-full min-h-[80px] flex flex-col items-center justify-center gap-1 opacity-0 group-hover/cell:opacity-100 transition-opacity">
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center ${isToday ? 'bg-blue-100' : 'bg-slate-100'}`}>
+                              <Plus className={`w-3.5 h-3.5 ${isToday ? 'text-blue-500' : 'text-slate-400'}`} />
+                            </div>
+                            <span className={`text-[10px] font-medium text-center leading-tight ${isToday ? 'text-blue-400' : 'text-slate-400'}`}>
+                              {isToday ? 'Añadir ruta\nde hoy' : 'Añadir ruta'}
                             </span>
                           </div>
+                        )
                       }
+                      {/* First-run hint: show on today's cell only if vehicle has zero routes ever */}
+                      {!hasContent && !vehicleHasAnyRoutes && isToday && (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 pointer-events-none">
+                          <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center">
+                            <Plus className="w-3.5 h-3.5 text-blue-500" />
+                          </div>
+                          <span className="text-[10px] font-semibold text-blue-400 text-center leading-tight px-2">
+                            Pulsa para añadir una ruta
+                          </span>
+                        </div>
+                      )}
                     </td>
                   );
                 })}
@@ -433,10 +490,21 @@ export default function App() {
                     <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center">
                       <Truck className="w-8 h-8 text-slate-300" />
                     </div>
-                    {vehicles.length === 0
-                      ? <><div className="font-semibold text-slate-600">Sin camiones todavía</div><div className="text-sm text-slate-400">Usa "Gestionar flota" para añadir</div></>
-                      : <><div className="font-semibold text-slate-600">Sin resultados</div><div className="text-sm text-slate-400">Nada coincide con "{filterText}"</div></>
-                    }
+                    {vehicles.length === 0 ? (
+                      <>
+                        <div className="font-semibold text-slate-700 text-base">Todavía no hay camiones</div>
+                        <div className="text-sm text-slate-400 max-w-xs">Añade tu flota usando el botón <strong className="text-slate-600">Gestionar flota</strong> en la barra superior. Después pulsa cualquier celda del calendario para registrar rutas.</div>
+                        <button onClick={() => setShowTrucks(true)} className="mt-2 px-5 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 transition shadow-sm flex items-center gap-2">
+                          <Truck className="w-4 h-4" /> Añadir primer camión
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="font-semibold text-slate-600">Sin resultados para "{filterText}"</div>
+                        <div className="text-sm text-slate-400">Prueba con la matrícula o nombre del conductor</div>
+                        <button onClick={() => setFilterText('')} className="mt-1 text-xs text-blue-500 hover:underline">Limpiar búsqueda</button>
+                      </>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -445,43 +513,80 @@ export default function App() {
         </table>
       </div>
 
-      {/* FOOTER */}
-      <footer className="px-5 py-2.5 bg-white border-t border-slate-200 flex justify-between items-center">
-        <div className="flex items-center gap-4 text-xs text-slate-500">
-          <span className="flex items-center gap-1.5"><Gauge className="w-3.5 h-3.5 text-slate-400" />Vel. máx. <strong className="text-slate-700 ml-1">90 km/h</strong></span>
-          <span className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 text-slate-400" />Pausa <strong className="text-slate-700 ml-1">45 min / 4 h</strong></span>
+
+      {/* NOTIFICATION PANEL */}
+      {showNotifPanel && (
+        <div className="fixed top-16 right-4 z-50 w-[420px] bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+          <div className={`flex items-center justify-between px-4 py-3 text-white ${notifications.length > 0 ? 'bg-emerald-600' : 'bg-slate-600'}`}>
+            <div className="flex items-center gap-2 font-bold text-sm">
+              <Bell className="w-4 h-4" />
+              {notifications.length > 0 ? `Llegadas pendientes (${notifications.length})` : 'Notificaciones'}
+            </div>
+            <div className="flex items-center gap-1">
+              {notifications.length > 0 && <button onClick={dismissAllNotifs} className="text-xs text-emerald-200 hover:text-white px-2 py-0.5 rounded hover:bg-white/20 transition">Limpiar todo</button>}
+              <button onClick={() => setShowNotifPanel(false)} className="hover:bg-white/20 rounded-lg p-1 transition"><X className="w-4 h-4" /></button>
+            </div>
+          </div>
+          {notifications.length === 0 ? (
+            <div className="px-6 py-10 text-center">
+              <CheckCircle2 className="w-10 h-10 text-slate-200 mx-auto mb-3" />
+              <div className="text-sm font-semibold text-slate-500">Todo al día</div>
+              <div className="text-xs text-slate-400 mt-1">Las llegadas se notifican automáticamente cuando se cumple la hora prevista</div>
+            </div>
+          ) : (
+            <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+              {notifications.map(n => (
+                <div key={n.id} className="p-3 flex items-start gap-3 hover:bg-slate-50 transition">
+                  <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Bell className="w-3.5 h-3.5 text-emerald-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-sm text-slate-800">{n.vehicle}{n.driver && <span className="font-normal text-slate-500"> · {n.driver}</span>}</div>
+                    <div className="text-xs text-slate-600 mt-0.5 break-words">{n.route}</div>
+                    <div className="text-xs text-emerald-700 font-semibold mt-1">Hora prevista: {n.time}</div>
+                  </div>
+                  <button onClick={() => dismissNotif(n.id)} className="text-slate-300 hover:text-red-400 transition flex-shrink-0 mt-0.5"><X className="w-3.5 h-3.5" /></button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-        <div className="flex items-center gap-1.5 text-xs">
-          {apiKey
-            ? <><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /><span className="text-emerald-700 font-medium">OpenRouteService activo</span></>
-            : <><AlertCircle className="w-3.5 h-3.5 text-amber-500" /><span className="text-amber-700 font-medium">Cálculo aproximado</span></>
-          }
-        </div>
-      </footer>
+      )}
 
       {/* MODALS */}
       {showTrucks && (
         <TrucksModal vehicles={vehicles} onAdd={addVehicle} onUpdate={updateVehicle} onDelete={deleteVehicle} onReorder={reorderVehicles} onClose={() => setShowTrucks(false)} />
       )}
-      {editingCell && (
-        <CellEditor
-          vehicleId={editingCell.vehicleId} date={editingCell.date} data={editingCell.data}
-          apiKey={apiKey}
-          savedTags={savedTags}
-          arrivingRoutes={notifications.filter(n => n.vehicleId === editingCell.vehicleId)}
-          onDismissNotif={dismissNotif}
-          onSave={async (data) => { await saveCell(editingCell.vehicleId, editingCell.date, data); setEditingCell(null); }}
-          onClear={() => {
-            const plate = vehicles.find(v => v.id === editingCell.vehicleId)?.plate || 'este camión';
-            clearAllCells(editingCell.vehicleId, plate);
-          }}
-          onAddTag={addTag}
-          onDeleteTag={removeTag}
-          onCancel={() => setEditingCell(null)}
-          vehicleName={vehicles.find(v => v.id === editingCell.vehicleId)?.plate || ''}
-          driverName={vehicles.find(v => v.id === editingCell.vehicleId)?.driver || ''}
-        />
-      )}
+      {dayPanel && (() => {
+        const { departing, spanning } = getRoutesForDay(dayPanel.vehicleId, dayPanel.date);
+        const dayNote = getDayNote(dayPanel.vehicleId, dayPanel.date);
+        const vehicle = vehicles.find(v => v.id === dayPanel.vehicleId);
+        const arrivingNotifs = notifications.filter(n => n.vehicleId === dayPanel.vehicleId);
+        return (
+          <CellEditor
+            vehicleId={dayPanel.vehicleId}
+            date={dayPanel.date}
+            vehicleName={vehicle?.plate || ''}
+            driverName={vehicle?.driver || ''}
+            departing={departing}
+            spanning={spanning}
+            dayNote={dayNote}
+            savedTags={savedTags}
+            apiKey={apiKey}
+            arrivingRoutes={arrivingNotifs}
+            onDismissNotif={dismissNotif}
+            onRouteCreate={(data) => addRoute(dayPanel.vehicleId, data)}
+            onRouteUpdate={updateRouteById}
+            onRouteDelete={deleteRouteById}
+            onDayNoteSave={(notes, tags) => saveDayNote(dayPanel.vehicleId, dayPanel.date, notes, tags)}
+            onClearDay={() => clearDayForVehicle(dayPanel.vehicleId, dayPanel.date)}
+            onClearAll={() => clearAllForVehicle(dayPanel.vehicleId, vehicle?.plate || 'este camión')}
+            onAddTag={addTag}
+            onDeleteTag={removeTag}
+            onClose={() => setDayPanel(null)}
+          />
+        );
+      })()}
       {showSettings && (
         <SettingsModal
           apiKey={apiKey}
@@ -493,37 +598,6 @@ export default function App() {
       )}
       {confirmDialog && (
         <ConfirmDialog {...confirmDialog} onCancel={() => setConfirmDialog(null)} />
-      )}
-
-      {/* NOTIFICATION PANEL */}
-      {showNotifPanel && notifications.length > 0 && (
-        <div className="fixed top-16 right-4 z-50 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 bg-emerald-600 text-white">
-            <div className="flex items-center gap-2 font-bold text-sm">
-              <Bell className="w-4 h-4" />
-              Llegadas pendientes ({notifications.length})
-            </div>
-            <div className="flex items-center gap-1">
-              <button onClick={dismissAllNotifs} className="text-xs text-emerald-200 hover:text-white px-2 py-0.5 rounded hover:bg-white/20 transition">Limpiar todo</button>
-              <button onClick={() => setShowNotifPanel(false)} className="hover:bg-white/20 rounded-lg p-1 transition"><X className="w-4 h-4" /></button>
-            </div>
-          </div>
-          <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
-            {notifications.map(n => (
-              <div key={n.id} className="p-3 flex items-start gap-3 hover:bg-slate-50 transition">
-                <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <Bell className="w-3.5 h-3.5 text-emerald-600" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-bold text-sm text-slate-800">{n.vehicle}{n.driver && <span className="font-normal text-slate-500"> · {n.driver}</span>}</div>
-                  <div className="text-xs text-slate-600 truncate mt-0.5">{n.route}</div>
-                  <div className="text-xs text-emerald-700 font-semibold mt-0.5">Hora prevista: {n.time}</div>
-                </div>
-                <button onClick={() => dismissNotif(n.id)} className="text-slate-300 hover:text-red-400 transition flex-shrink-0 mt-0.5"><X className="w-3.5 h-3.5" /></button>
-              </div>
-            ))}
-          </div>
-        </div>
       )}
 
       {toast && (

@@ -1,434 +1,764 @@
 import { useState, useEffect, useRef } from 'react';
-import { useForm, useFieldArray } from 'react-hook-form';
+import { useForm } from 'react-hook-form';
 import { AddressInput } from './AddressInput';
 import {
   Plus, Trash2, X, Clock, MapPin, Euro, Package, Phone, Building2,
   Truck, Calendar, Edit2, AlertCircle, ArrowRight, Calculator,
-  StickyNote, Tag as TagIcon, User, Navigation, ChevronDown, Check, CheckCircle2,
+  StickyNote, User, Navigation, ChevronDown, Check, CheckCircle2,
+  Tag as TagIcon, Save, CalendarDays,
 } from 'lucide-react';
-import { TAG_COLORS, COLOR_CYCLE } from '../constants';
+import { TAG_COLORS, COLOR_CYCLE, TAG_CATEGORIES, TAG_CATEGORY_KEYS } from '../constants';
+
+const CAT_ICONS = { vehiculo: Truck, ruta: Package, dia: CalendarDays };
 import { uid, formatDateFull, toISODate, daysBetween, calculateDrivingTime, formatDuration, addMinutesToDateTime, getRouteDistance } from '../utils';
 import { SectionLabel, IconInput } from './primitives';
 
-export function CellEditor({ date, data, apiKey, savedTags, arrivingRoutes = [], onDismissNotif, onSave, onClear, onCancel, onAddTag, onDeleteTag, vehicleName, driverName }) {
-  const defaultRoute = () => ({
-    origin: '', destination: '',
-    departureDate: toISODate(date), departureTime: '',
-    arrivalDate: toISODate(date), arrivalTime: '',
-    distanceKm: null, estimatedMinutes: null, source: null,
-  });
+// ─── MAIN PANEL ───────────────────────────────────────────────────────────────
 
-  const { register, handleSubmit, control, watch, setValue, getValues, formState: { errors } } = useForm({
-    defaultValues: {
-      title:   data.title   || '',
-      routes:  data.routes?.length ? data.routes : [defaultRoute()],
-      notes:   data.notes   || '',
-      tags:    data.tags    || [],
-      company: data.company || {},
-    },
-  });
-
-  const { fields, append, remove } = useFieldArray({ control, name: 'routes' });
-  const [calculating, setCalculating]   = useState(-1);
-  const [routeErrors, setRouteErrors]   = useState({});
+export function CellEditor({
+  vehicleId, date, vehicleName, driverName,
+  departing, spanning, dayNote,
+  savedTags, apiKey,
+  arrivingRoutes = [], onDismissNotif,
+  onRouteCreate, onRouteUpdate, onRouteDelete,
+  onDayNoteSave,
+  onClearDay, onClearAll,
+  onAddTag, onDeleteTag,
+  onClose,
+}) {
+  const [activeTab, setActiveTab]       = useState('routes');
+  const [editingRoute, setEditingRoute] = useState(null); // null | 'new' | routeId
+  const [noteForm, setNoteForm]         = useState({ notes: dayNote?.notes || '', tags: dayNote?.tags || [] });
+  const [savingNote, setSavingNote]     = useState(false);
   const [localNewTags, setLocalNewTags] = useState([]);
-  const [showCompany, setShowCompany]   = useState(
-    !!(data.company?.name || data.company?.contact || data.company?.price || data.company?.cargo || data.company?.notes)
-  );
-  const allTags = [...savedTags, ...localNewTags];
 
-  const tags         = watch('tags');
-  const routes       = watch('routes');
-  const companyPrice = watch('company.price');
-  const totalKm      = routes.reduce((s, r) => s + (Number(r.distanceKm) || 0), 0);
-  const pricePerKm   = totalKm > 0 && companyPrice ? (parseFloat(companyPrice) / totalKm).toFixed(2) : null;
+  const allTags   = [...savedTags, ...localNewTags];
+  const allActive = [
+    ...departing.map(r => ({ ...r, _spanType: 'departure' })),
+    ...spanning,
+  ].sort((a, b) => ({ departure: 0, transit: 1, arrival: 2 }[a._spanType] - { departure: 0, transit: 1, arrival: 2 }[b._spanType]));
 
-  const toggleTag = (tagId) => {
-    const curr = getValues('tags');
-    setValue('tags', curr.includes(tagId) ? curr.filter(t => t !== tagId) : [...curr, tagId]);
+  const notesDirty = noteForm.notes !== (dayNote?.notes || '') ||
+    JSON.stringify(noteForm.tags) !== JSON.stringify(dayNote?.tags || []);
+
+  const handleSave = async () => {
+    if (notesDirty) {
+      setSavingNote(true);
+      await onDayNoteSave(noteForm.notes, noteForm.tags);
+      setSavingNote(false);
+    }
+    onClose();
   };
 
-  const calcRoute = async (idx) => {
-    const r = getValues(`routes.${idx}`);
-    if (!r.origin || !r.destination) {
-      setRouteErrors(p => ({ ...p, [idx]: 'Introduce origen y destino' }));
-      return;
-    }
-    setCalculating(idx);
-    setRouteErrors(p => ({ ...p, [idx]: null }));
-    const result = await getRouteDistance(r.origin, r.destination, apiKey);
-    if (result) {
-      const mins = calculateDrivingTime(result.distanceKm);
-      setValue(`routes.${idx}.distanceKm`, result.distanceKm);
-      setValue(`routes.${idx}.estimatedMinutes`, mins);
-      setValue(`routes.${idx}.source`, result.source);
-      const arr = addMinutesToDateTime(getValues(`routes.${idx}.departureDate`), getValues(`routes.${idx}.departureTime`), mins);
-      if (arr) { setValue(`routes.${idx}.arrivalDate`, arr.date); setValue(`routes.${idx}.arrivalTime`, arr.time); }
-    } else {
-      setRouteErrors(p => ({ ...p, [idx]: 'No se pudo localizar alguna ciudad' }));
-    }
-    setCalculating(-1);
+  const handleTagCreate = (label, newTag) => {
+    setLocalNewTags(p => [...p, newTag]);
+    onAddTag?.(newTag);
   };
 
-  const onSubmit = (d) => {
-    onSave({
-      title:   (d.title || '').trim(),
-      routes:  d.routes.filter(r => r.origin || r.destination),
-      notes:   d.notes,
-      tags:    d.tags,
-      company: { ...d.company, pricePerKm },
-    });
+  const handleTagDelete = (id) => {
+    onDeleteTag?.(id);
+    setLocalNewTags(p => p.filter(t => t.id !== id));
+    setNoteForm(p => ({ ...p, tags: p.tags.filter(t => t !== id) }));
   };
 
   return (
-    <div className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onCancel}>
+    <div className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
       <div
         className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col"
-        style={{ maxHeight: 'min(92vh, 760px)' }}
+        style={{ maxHeight: 'min(94vh, 860px)' }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Header */}
-        <header className="px-6 py-4 bg-gradient-to-r from-blue-600 to-blue-700 flex items-center justify-between flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-              <Truck className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <div className="font-bold text-white">{vehicleName || 'Sin matrícula'}</div>
-              <div className="text-xs text-blue-200 flex items-center gap-2 mt-0.5">
-                {driverName && <><User className="w-3 h-3" />{driverName} · </>}
-                <Calendar className="w-3 h-3" />{formatDateFull(date)}
+        {/* ── HEADER ── */}
+        <header className="flex-shrink-0 bg-gradient-to-r from-blue-600 to-blue-700">
+          <div className="px-6 pt-4 pb-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+                <Truck className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <div className="font-bold text-white text-base leading-tight">{vehicleName || 'Sin matrícula'}</div>
+                <div className="text-xs text-blue-200 flex items-center gap-1.5 mt-0.5">
+                  {driverName && <><User className="w-3 h-3" /><span>{driverName}</span><span className="text-blue-300">·</span></>}
+                  <Calendar className="w-3 h-3" />
+                  <span>{formatDateFull(date)}</span>
+                </div>
               </div>
             </div>
-          </div>
-          <div className="flex items-center gap-1">
-            {(data.routes?.length > 0 || data.notes || data.tags?.length > 0) && (
-              <button type="button" onClick={onClear}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-red-500 text-white rounded-xl text-xs font-semibold transition mr-1"
-                title="Borrar todos los datos de este camión">
-                <Trash2 className="w-3.5 h-3.5" /> Borrar
-              </button>
-            )}
-            <button onClick={onCancel} className="p-2 hover:bg-white/20 rounded-xl transition">
+            <button onClick={onClose} className="p-2 hover:bg-white/20 rounded-xl transition flex-shrink-0">
               <X className="w-5 h-5 text-white" />
             </button>
           </div>
+
+          {/* Tabs — flush to bottom, white bg so they merge with content */}
+          <div className="flex px-6 gap-0">
+            <TabBtn active={activeTab === 'routes'} onClick={() => setActiveTab('routes')}>
+              <MapPin className="w-3.5 h-3.5" />
+              Rutas
+              {allActive.length > 0 && (
+                <span className={`ml-1.5 px-1.5 py-px rounded-full text-[10px] font-bold leading-none ${activeTab === 'routes' ? 'bg-blue-600 text-white' : 'bg-white/20 text-white'}`}>
+                  {allActive.length}
+                </span>
+              )}
+            </TabBtn>
+            <TabBtn active={activeTab === 'notes'} onClick={() => setActiveTab('notes')}>
+              <StickyNote className="w-3.5 h-3.5" />
+              Anotaciones
+              {notesDirty && <span className="ml-1.5 w-1.5 h-1.5 rounded-full bg-amber-400 inline-block flex-shrink-0" />}
+            </TabBtn>
+          </div>
         </header>
 
-        {/* Arriving routes alert */}
+        {/* ── ARRIVING ALERTS ── */}
         {arrivingRoutes.length > 0 && (
-          <div className="bg-emerald-50 border-b border-emerald-200 px-4 py-3 space-y-2">
+          <div className="bg-emerald-50 border-b-2 border-emerald-200 px-5 py-3 space-y-2 flex-shrink-0">
             <div className="flex items-center gap-2 text-emerald-800 font-bold text-xs uppercase tracking-wider">
-              <CheckCircle2 className="w-3.5 h-3.5" /> {arrivingRoutes.length === 1 ? 'Llegada pendiente de confirmar' : `${arrivingRoutes.length} llegadas pendientes`}
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              {arrivingRoutes.length === 1 ? 'Llegada pendiente de confirmar' : `${arrivingRoutes.length} llegadas pendientes`}
             </div>
             {arrivingRoutes.map(n => (
-              <div key={n.id} className="flex items-center justify-between gap-2 bg-white border border-emerald-200 rounded-xl px-3 py-2">
+              <div key={n.id} className="flex items-center justify-between gap-3 bg-white border border-emerald-200 rounded-xl px-3 py-2.5">
                 <div className="min-w-0">
                   <div className="text-sm font-semibold text-slate-800 truncate">{n.route}</div>
-                  <div className="text-xs text-emerald-700 font-medium">Hora prevista: {n.time}</div>
+                  <div className="text-xs text-emerald-700 font-medium mt-0.5">Hora prevista: {n.time}</div>
                 </div>
                 <button type="button" onClick={() => onDismissNotif?.(n.id)}
                   className="flex-shrink-0 px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-bold transition">
-                  Confirmar
+                  Confirmar llegada
                 </button>
               </div>
             ))}
           </div>
         )}
 
-        {/* Scrollable content */}
+        {/* ── TAB CONTENT ── */}
         <div className="flex-1 overflow-y-auto">
-          <div className="p-6 space-y-6">
 
-            {/* Title + Tags */}
-            <section className="space-y-3">
-              <IconInput
-                icon={<Edit2 className="w-3.5 h-3.5" />}
-                iconColor="text-slate-400"
-                {...register('title')}
-                placeholder="Nombre del servicio"
-                className="text-base font-semibold placeholder-slate-300"
-              />
-              <TagPicker
-                savedTags={allTags}
-                selectedIds={tags}
-                onSelect={toggleTag}
-                onCreateAndSelect={(label, newTag) => {
-                  setLocalNewTags(p => [...p, newTag]);
-                  onAddTag?.(newTag);
-                  setValue('tags', [...getValues('tags'), newTag.id]);
-                }}
-                onDeleteTag={(id) => {
-                  onDeleteTag?.(id);
-                  setLocalNewTags(p => p.filter(t => t.id !== id));
-                  setValue('tags', getValues('tags').filter(t => t !== id));
-                }}
-              />
-            </section>
-
-            {/* Routes */}
-            <section>
-              <div className="flex items-center justify-between mb-3">
-                <SectionLabel icon={<MapPin className="w-3.5 h-3.5" />} label="Rutas" note="máx. 3" />
-                {fields.length < 3 && (
-                  <button type="button" onClick={() => append(defaultRoute())}
-                    className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-semibold">
-                    <Plus className="w-3.5 h-3.5" /> Añadir ruta
+          {/* ════ TAB: RUTAS ════ */}
+          {activeTab === 'routes' && (
+            <div className="px-6 py-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-slate-500">
+                  {allActive.length === 0
+                    ? 'Sin rutas activas este día'
+                    : `${allActive.length} ruta${allActive.length !== 1 ? 's' : ''} activa${allActive.length !== 1 ? 's' : ''} este día`}
+                </p>
+                {editingRoute !== 'new' && (
+                  <button type="button" onClick={() => setEditingRoute('new')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 transition shadow-sm">
+                    <Plus className="w-3.5 h-3.5" /> Nueva ruta
                   </button>
                 )}
               </div>
-              <div className="space-y-4">
-                {fields.map((field, i) => {
-                  const r = routes[i] || {};
-                  const isMulti = r.departureDate && r.arrivalDate && r.departureDate !== r.arrivalDate;
-                  return (
-                    <div key={field.id} className="rounded-xl border border-slate-200 overflow-hidden bg-white">
-                      <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50 border-b border-slate-200">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-slate-500">Ruta {i + 1}</span>
-                          {isMulti && <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[11px] font-bold">{daysBetween(r.departureDate, r.arrivalDate) + 1} días</span>}
-                        </div>
-                        <button type="button" onClick={() => remove(i)} className="p-1 hover:bg-red-50 rounded-lg text-slate-300 hover:text-red-400 transition">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
 
-                      <div className="p-4 space-y-4">
-                        {/* Origin → Destination */}
-                        <div className="flex items-center gap-2">
-                          <AddressInput
-                            className="flex-1"
-                            value={r.origin || ''}
-                            onChange={(val) => setValue(`routes.${i}.origin`, val)}
-                            placeholder="Origen"
-                            apiKey={apiKey}
-                            fullAddress
-                            icon={<MapPin className="w-3.5 h-3.5" />}
-                          />
-                          <ArrowRight className="w-4 h-4 text-slate-300 flex-shrink-0" />
-                          <AddressInput
-                            className="flex-1"
-                            value={r.destination || ''}
-                            onChange={(val) => setValue(`routes.${i}.destination`, val)}
-                            placeholder="Destino"
-                            apiKey={apiKey}
-                            fullAddress
-                            icon={<Navigation className="w-3.5 h-3.5" />}
-                          />
-                        </div>
-
-                        {/* Salida / Llegada columns */}
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="space-y-1.5">
-                            <div className="flex items-center gap-1.5 px-1">
-                              <div className="w-1.5 h-1.5 rounded-full bg-slate-400" />
-                              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Salida</span>
-                            </div>
-                            <div className="relative">
-                              <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
-                              <input type="date" {...register(`routes.${i}.departureDate`)} className="w-full pl-8 pr-2 py-2 text-sm border border-slate-200 rounded-lg focus:border-blue-400 focus:ring-2 focus:ring-blue-100 focus:outline-none transition" />
-                            </div>
-                            <div className="relative">
-                              <Clock className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
-                              <input type="time" {...register(`routes.${i}.departureTime`, {
-                                onChange: (e) => {
-                                  const mins = getValues(`routes.${i}.estimatedMinutes`);
-                                  const dep  = getValues(`routes.${i}.departureDate`);
-                                  if (mins && dep) {
-                                    const arr = addMinutesToDateTime(dep, e.target.value, mins);
-                                    if (arr) { setValue(`routes.${i}.arrivalDate`, arr.date); setValue(`routes.${i}.arrivalTime`, arr.time); }
-                                  }
-                                },
-                              })} className="w-full pl-8 pr-2 py-2 text-sm border border-slate-200 rounded-lg focus:border-blue-400 focus:ring-2 focus:ring-blue-100 focus:outline-none transition" />
-                            </div>
-                          </div>
-                          <div className="space-y-1.5">
-                            <div className="flex items-center gap-1.5 px-1">
-                              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                              <span className="text-[11px] font-bold text-emerald-600 uppercase tracking-wider">Llegada</span>
-                            </div>
-                            <div className="relative">
-                              <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
-                              <input type="date"
-                              {...register(`routes.${i}.arrivalDate`, {
-                                validate: v => !r.departureDate || v >= r.departureDate || 'La llegada no puede ser antes de la salida',
-                              })}
-                              min={r.departureDate}
-                              className="w-full pl-8 pr-2 py-2 text-sm border border-slate-200 rounded-lg focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none transition" />
-                            </div>
-                            {errors.routes?.[i]?.arrivalDate && (
-                              <div className="flex items-center gap-1 text-xs text-red-600">
-                                <AlertCircle className="w-3 h-3 flex-shrink-0" />{errors.routes[i].arrivalDate.message}
-                              </div>
-                            )}
-                            <div className="relative">
-                              <Clock className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
-                              <input type="time" {...register(`routes.${i}.arrivalTime`)} className="w-full pl-8 pr-2 py-2 text-sm border border-slate-200 rounded-lg focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none transition" />
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Calculate */}
-                        <div className="space-y-1.5">
-                          <div className="flex items-center gap-3">
-                            <button type="button" onClick={() => calcRoute(i)} disabled={calculating === i}
-                              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-40 font-medium transition">
-                              <Calculator className="w-3.5 h-3.5" />
-                              {calculating === i ? 'Calculando…' : 'Calcular ruta'}
-                            </button>
-                            {r.distanceKm != null && (
-                              <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                                <span className="font-bold">{r.distanceKm} km</span>
-                                <span className="text-slate-300">·</span>
-                                <span className="text-slate-500">{formatDuration(r.estimatedMinutes)}</span>
-                                {r.source === 'APROX' && <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[11px] font-bold">APROX</span>}
-                              </div>
-                            )}
-                          </div>
-                          <p className="text-[11px] text-slate-400 leading-tight">
-                            Calcula distancia y estima la hora de llegada · máx. 90 km/h · pausa 45 min cada 4 h
-                          </p>
-                        </div>
-                        {routeErrors[i] && (
-                          <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-                            <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" /> {routeErrors[i]}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-
-            {/* Company — collapsible */}
-            <section>
-              <button type="button" onClick={() => setShowCompany(p => !p)}
-                className="flex items-center gap-2 w-full text-left">
-                <SectionLabel icon={<Building2 className="w-3.5 h-3.5" />} label="Datos de empresa" />
-                <ChevronDown className={`w-4 h-4 text-slate-400 ml-auto transition-transform ${showCompany ? 'rotate-180' : ''}`} />
-              </button>
-              {showCompany && <CompanyFields register={register} pricePerKm={pricePerKm} totalKm={totalKm} />}
-              {!showCompany && watch('company.name') && (
-                <div className="mt-2 px-3 py-2 bg-slate-50 rounded-lg text-xs text-slate-600 flex items-center gap-2">
-                  <Building2 className="w-3.5 h-3.5 text-slate-400" />
-                  <span className="font-semibold">{watch('company.name')}</span>
-                  {watch('company.price') && <span className="text-slate-400">· {watch('company.price')} €</span>}
-                </div>
+              {/* Empty state */}
+              {allActive.length === 0 && editingRoute !== 'new' && (
+                <button type="button" onClick={() => setEditingRoute('new')}
+                  className="w-full py-8 border-2 border-dashed border-slate-200 rounded-xl hover:border-blue-300 hover:bg-blue-50/40 transition group text-center">
+                  <Truck className="w-7 h-7 text-slate-200 group-hover:text-blue-300 mx-auto mb-2 transition" />
+                  <div className="text-sm font-semibold text-slate-400 group-hover:text-blue-600 transition">
+                    Añadir primera ruta de este día
+                  </div>
+                  <div className="text-xs text-slate-300 group-hover:text-blue-400 mt-1 transition">
+                    La fecha de salida se pre-rellena con el día seleccionado
+                  </div>
+                </button>
               )}
-            </section>
 
-            {/* Notes */}
-            <section>
-              <div className="relative">
-                <span className="absolute left-3 top-3 pointer-events-none text-slate-400"><StickyNote className="w-3.5 h-3.5" /></span>
-                <textarea {...register('notes')} placeholder="Notas, observaciones, incidencias…"
-                  className="w-full pl-9 pr-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 transition resize-none" rows={3} />
+              {/* Route cards / forms */}
+              {allActive.map(route =>
+                editingRoute === route.id
+                  ? <RouteForm key={route.id} route={route} date={date} apiKey={apiKey}
+                      allTags={allTags} onTagCreate={handleTagCreate} onTagDelete={handleTagDelete}
+                      onSave={async (data) => { await onRouteUpdate(route.id, data); setEditingRoute(null); }}
+                      onCancel={() => setEditingRoute(null)} />
+                  : <RouteCard key={route.id} route={route} savedTags={allTags}
+                      onEdit={() => setEditingRoute(route.id)}
+                      onDelete={() => onRouteDelete(route.id)} />
+              )}
+
+              {editingRoute === 'new' && (
+                <RouteForm route={null} date={date} apiKey={apiKey}
+                  allTags={allTags} onTagCreate={handleTagCreate} onTagDelete={handleTagDelete}
+                  onSave={async (data) => { await onRouteCreate(data); setEditingRoute(null); }}
+                  onCancel={() => setEditingRoute(null)} />
+              )}
+
+            </div>
+          )}
+
+          {/* ════ TAB: NOTAS DEL DÍA ════ */}
+          {activeTab === 'notes' && (
+            <div className="px-6 py-5 space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <TagIcon className="w-3 h-3" /> Etiquetas del día
+                </label>
+                <TagPicker
+                  savedTags={allTags}
+                  selectedIds={noteForm.tags}
+                  onSelect={(id) => setNoteForm(p => ({
+                    ...p,
+                    tags: p.tags.includes(id) ? p.tags.filter(t => t !== id) : [...p.tags, id],
+                  }))}
+                  onCreateAndSelect={(label, newTag) => {
+                    handleTagCreate(label, newTag);
+                    setNoteForm(p => ({ ...p, tags: [...p.tags, newTag.id] }));
+                  }}
+                  onDeleteTag={handleTagDelete}
+                />
               </div>
-            </section>
-          </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <StickyNote className="w-3 h-3" /> Notas
+                </label>
+                <textarea
+                  value={noteForm.notes}
+                  onChange={e => setNoteForm(p => ({ ...p, notes: e.target.value }))}
+                  placeholder="Observaciones, incidencias, instrucciones especiales para este día…"
+                  className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 transition resize-none placeholder-slate-300"
+                  rows={5}
+                  autoFocus
+                />
+              </div>
+
+            </div>
+          )}
         </div>
 
-        {/* Footer */}
-        <footer className="px-6 py-4 bg-white border-t-2 border-slate-100 flex justify-end gap-2 flex-shrink-0 shadow-[0_-4px_12px_rgba(0,0,0,0.06)]">
-          <button type="button" onClick={onCancel} className="px-5 py-2.5 text-sm text-slate-600 hover:bg-slate-100 rounded-xl font-medium transition">
-            Cancelar
-          </button>
-          <button type="button" onClick={() => handleSubmit(onSubmit)()}
-            className="px-6 py-2.5 text-sm bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-bold shadow-sm transition">
-            Guardar cambios
-          </button>
-        </footer>
+        {/* ── FOOTER ── */}
+        {notesDirty ? (
+          <footer className="px-6 py-4 bg-white border-t-2 border-slate-100 flex items-center justify-end gap-3 flex-shrink-0 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
+            <button type="button" onClick={onClose}
+              className="px-4 py-2.5 text-sm text-slate-500 hover:bg-slate-100 rounded-xl font-medium transition">
+              Descartar
+            </button>
+            <button type="button" onClick={handleSave} disabled={savingNote}
+              className="flex items-center gap-2 px-6 py-2.5 text-sm bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-bold shadow-sm transition disabled:opacity-60">
+              <Save className="w-4 h-4" />
+              {savingNote ? 'Guardando…' : 'Guardar notas'}
+            </button>
+          </footer>
+        ) : null}
       </div>
     </div>
   );
 }
 
-function CompanyFields({ register, pricePerKm, totalKm }) {
+// ── Tab button ────────────────────────────────────────────────────────────────
+function TabBtn({ active, onClick, children }) {
   return (
-    <div className="mt-3 bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-      <div className="grid grid-cols-2 gap-3">
-        <IconInput icon={<Building2 className="w-3.5 h-3.5" />} placeholder="Empresa" className="bg-white" {...register('company.name')} />
-        <IconInput icon={<Phone className="w-3.5 h-3.5" />} iconColor="text-slate-400" placeholder="+34 600 000 000" className="bg-white" {...register('company.contact')} />
-        <IconInput icon={<Euro className="w-3.5 h-3.5" />} iconColor="text-emerald-500" placeholder="Precio (€)" type="number" step="0.01" className="bg-white" {...register('company.price')} />
-        <IconInput icon={<Package className="w-3.5 h-3.5" />} iconColor="text-amber-500" placeholder="Mercancía" className="bg-white" {...register('company.cargo')} />
-        <div className="col-span-2">
-          <IconInput icon={<StickyNote className="w-3.5 h-3.5" />} iconColor="text-slate-400" placeholder="Referencia, instrucciones especiales…" className="bg-white" {...register('company.notes')} />
+    <button type="button" onClick={onClick}
+      className={`flex items-center gap-1.5 px-5 py-2.5 text-sm font-semibold transition-all rounded-t-xl ${
+        active
+          ? 'bg-white text-blue-700'
+          : 'text-blue-200 hover:text-white hover:bg-white/10'
+      }`}>
+      {children}
+    </button>
+  );
+}
+
+// ─── ROUTE CARD ───────────────────────────────────────────────────────────────
+
+const SPAN_CFG = {
+  departure: { label: 'Salida',  chipCls: 'bg-blue-100 text-blue-700',    dot: 'bg-blue-500'    },
+  transit:   { label: 'En ruta', chipCls: 'bg-amber-100 text-amber-700',  dot: 'bg-amber-500'   },
+  arrival:   { label: 'Llegada', chipCls: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+};
+
+function RouteCard({ route, savedTags, onEdit, onDelete }) {
+  const cfg    = SPAN_CFG[route._spanType] || SPAN_CFG.departure;
+  const isMulti = route.departure_date && route.arrival_date && route.departure_date !== route.arrival_date;
+  const tags   = (route.tags || []).map(id => savedTags.find(t => t.id === id)).filter(Boolean);
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+      {/* Card header bar */}
+      <div className="flex items-center justify-between px-4 py-2 bg-slate-50 border-b border-slate-100">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className={`flex-shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full ${cfg.chipCls}`}>
+            {cfg.label}
+          </span>
+          {route.title && (
+            <span className="text-xs font-semibold text-slate-600 truncate">{route.title}</span>
+          )}
+          {isMulti && (
+            <span className="flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">
+              {daysBetween(route.departure_date, route.arrival_date) + 1} días
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+          <button onClick={onEdit}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition">
+            <Edit2 className="w-3 h-3" /> Editar
+          </button>
+          <button onClick={onDelete}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition">
+            <Trash2 className="w-3 h-3" /> Borrar
+          </button>
         </div>
       </div>
-      {pricePerKm && (
-        <div className="flex items-center gap-2 text-sm bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5">
-          <Euro className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-          <span className="text-slate-600">Precio por km:</span>
-          <span className="font-bold text-emerald-700 text-base">{pricePerKm} €/km</span>
-          <span className="text-slate-400 text-xs ml-auto">{totalKm} km totales</span>
+
+      {/* Card body */}
+      <div className="px-4 py-3">
+        {/* Route: origin → destination */}
+        <div className="flex items-center gap-2 mb-2">
+          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cfg.dot}`} />
+          <span className="text-sm font-semibold text-slate-800 truncate">{route.origin || '—'}</span>
+          <ArrowRight className="w-3.5 h-3.5 text-slate-300 flex-shrink-0" />
+          <span className="text-sm font-semibold text-slate-800 truncate">{route.destination || '—'}</span>
         </div>
-      )}
+
+        {/* Departure + Arrival on same row */}
+        <div className="flex items-center gap-4 text-xs mb-2">
+          <span className="flex items-center gap-1.5 text-slate-500">
+            <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+            <span className="text-slate-400">Sal.</span>
+            <span className="font-semibold text-slate-700">{route.departure_date}</span>
+            {route.departure_time && <span className="font-semibold text-slate-700">{route.departure_time}</span>}
+          </span>
+          {route.arrival_date && (
+            <span className="flex items-center gap-1.5 text-slate-500">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              <span className="text-slate-400">Ll.</span>
+              <span className="font-semibold text-slate-700">{route.arrival_date}</span>
+              {route.arrival_time && <span className="font-semibold text-slate-700">{route.arrival_time}</span>}
+            </span>
+          )}
+        </div>
+
+        {/* Distance / company / tags */}
+        {(route.distance_km != null || route.company?.name || tags.length > 0) && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {route.distance_km != null && (
+              <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-100">
+                {route.distance_km} km · {formatDuration(route.estimated_minutes)}
+              </span>
+            )}
+            {route.company?.name && (
+              <span className="flex items-center gap-1 text-xs text-slate-500">
+                <Building2 className="w-3 h-3 text-slate-400" />{route.company.name}
+                {route.company.price && <span className="text-emerald-700 font-semibold">· {route.company.price} €</span>}
+              </span>
+            )}
+            {tags.map(tag => {
+              const c = TAG_COLORS[tag.color] || TAG_COLORS.slate;
+              return <span key={tag.id} className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${c.bg} ${c.text}`}>{tag.label}</span>;
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-function TagPicker({ savedTags, selectedIds, onSelect, onCreateAndSelect, onDeleteTag }) {
-  const [creating, setCreating] = useState(false);
-  const [newLabel, setNewLabel] = useState('');
-  const [newColor, setNewColor] = useState('blue');
-  const inputRef = useRef(null);
+// ─── ROUTE FORM ───────────────────────────────────────────────────────────────
 
-  useEffect(() => { if (creating) inputRef.current?.focus(); }, [creating]);
+function RouteForm({ route, date, apiKey, allTags, onTagCreate, onTagDelete, onSave, onCancel }) {
+  const isNew = !route;
+  const def = route ?? {
+    title: '', origin: '', destination: '',
+    departure_date: toISODate(date), departure_time: '',
+    arrival_date:   toISODate(date), arrival_time: '',
+    distance_km: null, estimated_minutes: null, source: null,
+    company: {}, tags: [],
+  };
 
-  const handleCreate = () => {
-    const label = newLabel.trim();
-    if (!label) return;
-    const newTag = { id: uid(), label, color: newColor };
-    onCreateAndSelect(label, newTag);
-    setNewLabel('');
-    setNewColor('blue');
-    setCreating(false);
+  const { register, handleSubmit, watch, setValue, getValues, formState: { errors } } = useForm({ defaultValues: def });
+  const [calculating, setCalculating] = useState(false);
+  const [calcError, setCalcError]     = useState(null);
+  const [saving, setSaving]           = useState(false);
+  const [showCompany, setShowCompany] = useState(!!(route?.company?.name || route?.company?.price));
+
+  const depDate    = watch('departure_date');
+  const distKm     = watch('distance_km');
+  const estMins    = watch('estimated_minutes');
+  const src        = watch('source');
+  const tags       = watch('tags') || [];
+  const price      = watch('company.price');
+  const totalKm    = Number(distKm) || 0;
+  const pricePerKm = totalKm > 0 && price ? (parseFloat(price) / totalKm).toFixed(2) : null;
+
+  const calcRoute = async () => {
+    const o = getValues('origin'), d = getValues('destination');
+    if (!o || !d) { setCalcError('Introduce origen y destino primero'); return; }
+    setCalculating(true); setCalcError(null);
+    const res = await getRouteDistance(o, d, apiKey);
+    if (res) {
+      const mins = calculateDrivingTime(res.distanceKm);
+      setValue('distance_km', res.distanceKm);
+      setValue('estimated_minutes', mins);
+      setValue('source', res.source);
+      const arr = addMinutesToDateTime(getValues('departure_date'), getValues('departure_time'), mins);
+      if (arr) { setValue('arrival_date', arr.date); setValue('arrival_time', arr.time); }
+    } else {
+      setCalcError('No se pudo localizar alguna ciudad');
+    }
+    setCalculating(false);
+  };
+
+  const onSubmit = async (d) => {
+    setSaving(true);
+    await onSave({
+      title: (d.title || '').trim(),
+      origin: d.origin, destination: d.destination,
+      departure_date: d.departure_date, departure_time: d.departure_time,
+      arrival_date: d.arrival_date, arrival_time: d.arrival_time,
+      distance_km: d.distance_km, estimated_minutes: d.estimated_minutes, source: d.source,
+      company: { ...d.company, pricePerKm },
+      tags: d.tags || [],
+    });
+    setSaving(false);
   };
 
   return (
-    <div className="space-y-2">
-      {savedTags.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {savedTags.map(tag => {
-            const c = TAG_COLORS[tag.color] || TAG_COLORS.slate;
-            const active = selectedIds.includes(tag.id);
-            return (
-              <div key={tag.id} className="group relative">
-                <button type="button" onClick={() => onSelect(tag.id)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${active ? `${c.bg} ${c.text} border-transparent shadow-sm` : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:text-slate-700'}`}>
-                  {active && <Check className="w-3 h-3 inline mr-1 -mt-0.5" />}{tag.label}
-                </button>
-                {onDeleteTag && (
-                  <button type="button" onClick={() => onDeleteTag(tag.id)}
-                    className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full items-center justify-center hidden group-hover:flex transition">
-                    <X className="w-2.5 h-2.5" />
-                  </button>
-                )}
+    <div className="rounded-xl border-2 border-blue-300 overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2.5 bg-blue-600">
+        <span className="text-sm font-bold text-white">{isNew ? '+ Nueva ruta' : 'Editar ruta'}</span>
+        <button type="button" onClick={onCancel} className="text-blue-200 hover:text-white hover:bg-white/20 rounded-lg p-1 transition">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="p-4 space-y-4 bg-white">
+        {/* Service name */}
+        <IconInput icon={<Edit2 className="w-3.5 h-3.5" />} {...register('title')} placeholder="Nombre del servicio (opcional)" />
+
+        {/* Trayecto */}
+        <div>
+          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Trayecto</label>
+          <div className="flex items-center gap-2">
+            <AddressInput className="flex-1" value={watch('origin')} onChange={v => setValue('origin', v)}
+              placeholder="Origen" apiKey={apiKey} fullAddress icon={<MapPin className="w-3.5 h-3.5" />} />
+            <ArrowRight className="w-4 h-4 text-slate-300 flex-shrink-0" />
+            <AddressInput className="flex-1" value={watch('destination')} onChange={v => setValue('destination', v)}
+              placeholder="Destino" apiKey={apiKey} fullAddress icon={<Navigation className="w-3.5 h-3.5" />} />
+          </div>
+        </div>
+
+        {/* Salida / Llegada */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-slate-400 flex-shrink-0" />
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Salida</span>
+            </div>
+            <div className="relative">
+              <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+              <input type="date" {...register('departure_date')} className="w-full pl-8 pr-2 py-2 text-sm border border-slate-200 rounded-lg focus:border-blue-400 focus:ring-2 focus:ring-blue-100 focus:outline-none transition" />
+            </div>
+            <div className="relative">
+              <Clock className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+              <input type="time" {...register('departure_time', {
+                onChange: (e) => {
+                  const mins = getValues('estimated_minutes'), dep = getValues('departure_date');
+                  if (mins && dep) { const arr = addMinutesToDateTime(dep, e.target.value, mins); if (arr) { setValue('arrival_date', arr.date); setValue('arrival_time', arr.time); } }
+                },
+              })} className="w-full pl-8 pr-2 py-2 text-sm border border-slate-200 rounded-lg focus:border-blue-400 focus:ring-2 focus:ring-blue-100 focus:outline-none transition" />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
+              <span className="text-[11px] font-bold text-emerald-600 uppercase tracking-wider">Llegada</span>
+            </div>
+            <div className="relative">
+              <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+              <input type="date"
+                {...register('arrival_date', { validate: v => !depDate || v >= depDate || 'La llegada no puede ser antes de la salida' })}
+                min={depDate}
+                className="w-full pl-8 pr-2 py-2 text-sm border border-slate-200 rounded-lg focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none transition" />
+            </div>
+            {errors.arrival_date && (
+              <div className="flex items-center gap-1 text-xs text-red-600 px-1">
+                <AlertCircle className="w-3 h-3" />{errors.arrival_date.message}
               </div>
-            );
-          })}
+            )}
+            <div className="relative">
+              <Clock className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+              <input type="time" {...register('arrival_time')} className="w-full pl-8 pr-2 py-2 text-sm border border-slate-200 rounded-lg focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 focus:outline-none transition" />
+            </div>
+          </div>
+        </div>
+
+        {/* Calculate */}
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-3 flex-wrap">
+            <button type="button" onClick={calcRoute} disabled={calculating}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-40 font-medium transition">
+              <Calculator className="w-3.5 h-3.5" />{calculating ? 'Calculando…' : 'Calcular ruta'}
+            </button>
+            {distKm != null && (
+              <div className="flex items-center gap-2 text-sm text-slate-700">
+                <span className="font-bold">{distKm} km</span>
+                <span className="text-slate-300">·</span>
+                <span className="text-slate-500">{formatDuration(estMins)}</span>
+                {src === 'APROX' && <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[11px] font-bold">APROX</span>}
+              </div>
+            )}
+          </div>
+          {calcError && (
+            <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />{calcError}
+            </div>
+          )}
+          <p className="text-[11px] text-slate-400">Calcula distancia y estima hora de llegada · máx. 90 km/h · pausa 45 min / 4 h</p>
+        </div>
+
+        {/* Etiquetas */}
+        <div>
+          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
+            <TagIcon className="w-3 h-3" /> Etiquetas de esta ruta
+          </label>
+          <InlineTagPicker
+            allTags={allTags}
+            selectedIds={tags}
+            onToggle={(id) => setValue('tags', tags.includes(id) ? tags.filter(t => t !== id) : [...tags, id])}
+            onTagCreate={(label, tag) => { onTagCreate(label, tag); setValue('tags', [...tags, tag.id]); }}
+            onTagDelete={(id) => { onTagDelete(id); setValue('tags', tags.filter(t => t !== id)); }}
+          />
+        </div>
+
+        {/* Company */}
+        <div>
+          <button type="button" onClick={() => setShowCompany(p => !p)}
+            className="flex items-center gap-2 text-xs text-slate-500 hover:text-slate-700 font-semibold transition w-full text-left">
+            <Building2 className="w-3.5 h-3.5" />
+            Datos de empresa
+            <ChevronDown className={`w-3.5 h-3.5 ml-auto transition-transform ${showCompany ? 'rotate-180' : ''}`} />
+          </button>
+          {showCompany && (
+            <div className="mt-3 border border-slate-200 rounded-xl p-3 space-y-2 bg-slate-50">
+              <div className="grid grid-cols-2 gap-2">
+                <IconInput icon={<Building2 className="w-3.5 h-3.5" />} placeholder="Empresa" className="bg-white" {...register('company.name')} />
+                <IconInput icon={<Phone className="w-3.5 h-3.5" />} iconColor="text-slate-400" placeholder="+34 600 000 000" className="bg-white" {...register('company.contact')} />
+                <IconInput icon={<Euro className="w-3.5 h-3.5" />} iconColor="text-emerald-500" placeholder="Precio (€)" type="number" step="0.01" className="bg-white" {...register('company.price')} />
+                <IconInput icon={<Package className="w-3.5 h-3.5" />} iconColor="text-amber-500" placeholder="Mercancía" className="bg-white" {...register('company.cargo')} />
+                <div className="col-span-2">
+                  <IconInput icon={<StickyNote className="w-3.5 h-3.5" />} iconColor="text-slate-400" placeholder="Referencia, instrucciones…" className="bg-white" {...register('company.notes')} />
+                </div>
+              </div>
+              {pricePerKm && (
+                <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
+                  <Euro className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  <span className="text-xs text-slate-600">€/km:</span>
+                  <span className="font-bold text-emerald-700">{pricePerKm} €/km</span>
+                  <span className="text-xs text-slate-400 ml-auto">{totalKm} km</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Form actions */}
+        <div className="flex gap-2 pt-2 border-t border-slate-100">
+          <button type="button" onClick={onCancel}
+            className="flex-1 py-2.5 text-sm text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-xl font-semibold transition">
+            Cancelar
+          </button>
+          <button type="button" onClick={() => handleSubmit(onSubmit)()} disabled={saving}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-bold transition disabled:opacity-60">
+            <Save className="w-3.5 h-3.5" />
+            {saving ? 'Guardando…' : isNew ? 'Crear ruta' : 'Guardar cambios'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── INLINE TAG PICKER (route form) — categories, ruta first ─────────────────
+
+function InlineTagPicker({ allTags, selectedIds, onToggle, onTagCreate, onTagDelete }) {
+  const [creating, setCreating] = useState(false);
+  const [label, setLabel]       = useState('');
+  const [color, setColor]       = useState('blue');
+  const [newCat, setNewCat]     = useState('ruta');
+  const ref = useRef(null);
+
+  useEffect(() => { if (creating) ref.current?.focus(); }, [creating]);
+
+  const create = () => {
+    const l = label.trim(); if (!l) return;
+    const tag = { id: uid(), label: l, color, category: newCat };
+    onTagCreate(l, tag);
+    setLabel(''); setColor('blue'); setCreating(false);
+  };
+
+  // Route form: ruta tags flat, vehiculo tags under divider — dia tags not shown here
+  const rutaTags  = allTags.filter(t => (t.category || 'ruta') === 'ruta');
+  const otherCats = [{ cat: 'vehiculo', cfg: TAG_CATEGORIES.vehiculo, Icon: CAT_ICONS.vehiculo, group: allTags.filter(t => (t.category || 'ruta') === 'vehiculo') }].filter(x => x.group.length > 0);
+
+  const TagPill = ({ tag }) => {
+    const c = TAG_COLORS[tag.color] || TAG_COLORS.slate;
+    const active = selectedIds.includes(tag.id);
+    return (
+      <div className="group relative">
+        <button type="button" onClick={() => onToggle(tag.id)}
+          className={`px-2.5 py-1 rounded-full text-xs font-semibold border transition-all ${active ? `${c.bg} ${c.text} border-transparent shadow-sm` : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>
+          {active && <Check className="w-3 h-3 inline mr-1 -mt-0.5" />}{tag.label}
+        </button>
+        <button type="button"
+          onMouseDown={e => { e.stopPropagation(); e.preventDefault(); onTagDelete(tag.id); }}
+          className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full items-center justify-center hidden group-hover:flex">
+          <X className="w-2.5 h-2.5" />
+        </button>
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-2.5">
+      {/* Primary: ruta tags — no heading needed */}
+      {rutaTags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {rutaTags.map(tag => <TagPill key={tag.id} tag={tag} />)}
         </div>
       )}
+
+      {/* Secondary: other categories under subtle dividers */}
+      {otherCats.map(({ cat, cfg, Icon, group }) => (
+        <div key={cat}>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <div className="h-px flex-1 bg-slate-100" />
+            <Icon className="w-3 h-3 text-slate-300" />
+            <span className="text-[10px] text-slate-400 font-medium">{cfg.label}</span>
+            <div className="h-px flex-1 bg-slate-100" />
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {group.map(tag => <TagPill key={tag.id} tag={tag} />)}
+          </div>
+        </div>
+      ))}
+
       {creating ? (
-        <div className="flex items-center gap-2 p-2 bg-slate-50 rounded-xl border border-slate-200">
-          <input ref={inputRef} value={newLabel} onChange={e => setNewLabel(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreate(); } if (e.key === 'Escape') setCreating(false); }}
-            placeholder="Nombre de la etiqueta"
-            className="flex-1 bg-transparent text-sm text-slate-700 placeholder-slate-400 outline-none min-w-0" />
-          <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1.5 px-2.5 py-2 bg-slate-50 rounded-xl border border-slate-200">
+          <input ref={ref} value={label} onChange={e => setLabel(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); create(); } if (e.key === 'Escape') setCreating(false); }}
+            placeholder="Nombre" className="w-24 bg-transparent text-xs outline-none text-slate-700 placeholder-slate-400" />
+          {/* Category mini toggle */}
+          <div className="flex gap-0.5">
+            {TAG_CATEGORY_KEYS.map(cat => { const I = CAT_ICONS[cat]; return (
+              <button key={cat} type="button" title={TAG_CATEGORIES[cat].label} onClick={() => setNewCat(cat)}
+                className={`p-1 rounded ${newCat === cat ? 'bg-blue-100 text-blue-600' : 'text-slate-300 hover:text-slate-500'}`}>
+                <I className="w-3 h-3" />
+              </button>
+            ); })}
+          </div>
+          <div className="flex gap-0.5">
             {COLOR_CYCLE.map(col => (
-              <button key={col} type="button" onClick={() => setNewColor(col)}
-                className={`w-4 h-4 rounded-full flex-shrink-0 ${TAG_COLORS[col].bg} transition-transform ${newColor === col ? 'scale-125 ring-2 ring-offset-1 ring-slate-300' : 'hover:scale-110 opacity-60 hover:opacity-100'}`} />
+              <button key={col} type="button" onClick={() => setColor(col)}
+                className={`w-3.5 h-3.5 rounded-full ${TAG_COLORS[col].bg} ${color === col ? 'scale-125 ring-1 ring-offset-1 ring-slate-300' : 'opacity-50 hover:opacity-100'}`} />
             ))}
           </div>
-          <button type="button" onClick={handleCreate} disabled={!newLabel.trim()}
-            className={`px-2.5 py-1 rounded-lg text-xs font-bold text-white transition disabled:opacity-40 flex-shrink-0 ${TAG_COLORS[newColor]?.bg || 'bg-blue-500'}`}>
-            Añadir
+          <button type="button" onClick={create} disabled={!label.trim()} className={`px-2 py-0.5 rounded text-[11px] font-bold text-white disabled:opacity-40 ${TAG_COLORS[color]?.bg || 'bg-blue-500'}`}>OK</button>
+          <button type="button" onClick={() => setCreating(false)} className="text-slate-400 hover:text-slate-600"><X className="w-3 h-3" /></button>
+        </div>
+      ) : (
+        <button type="button" onClick={() => setCreating(true)}
+          className="px-2.5 py-1 rounded-full text-xs font-semibold border border-dashed border-slate-300 text-slate-400 hover:border-blue-400 hover:text-blue-500 transition flex items-center gap-1">
+          <Plus className="w-3 h-3" /> Nueva etiqueta
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─── DAY-LEVEL TAG PICKER — dia + vehiculo first, ruta secondary ─────────────
+
+function TagPicker({ savedTags, selectedIds, onSelect, onCreateAndSelect, onDeleteTag }) {
+  const [creating, setCreating] = useState(false);
+  const [label, setLabel]       = useState('');
+  const [color, setColor]       = useState('blue');
+  const [newCat, setNewCat]     = useState('dia');
+  const ref = useRef(null);
+
+  useEffect(() => { if (creating) ref.current?.focus(); }, [creating]);
+
+  const create = () => {
+    const l = label.trim(); if (!l) return;
+    const tag = { id: uid(), label: l, color, category: newCat };
+    onCreateAndSelect(l, tag);
+    setLabel(''); setColor('blue'); setCreating(false);
+  };
+
+  // Day notes: only dia-category tags — ruta and vehiculo tags belong on routes, not days
+  const diaTags     = savedTags.filter(t => (t.category || 'ruta') === 'dia');
+  const otherGroups = [];
+
+  const TagPill = ({ tag }) => {
+    const c = TAG_COLORS[tag.color] || TAG_COLORS.slate;
+    const active = selectedIds.includes(tag.id);
+    return (
+      <div className="group relative">
+        <button type="button" onClick={() => onSelect(tag.id)}
+          className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${active ? `${c.bg} ${c.text} border-transparent shadow-sm` : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>
+          {active && <Check className="w-3 h-3 inline mr-1 -mt-0.5" />}{tag.label}
+        </button>
+        {onDeleteTag && (
+          <button type="button"
+            onMouseDown={e => { e.stopPropagation(); e.preventDefault(); onDeleteTag(tag.id); }}
+            className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full items-center justify-center hidden group-hover:flex">
+            <X className="w-2.5 h-2.5" />
           </button>
-          <button type="button" onClick={() => setCreating(false)} className="text-slate-400 hover:text-slate-600 flex-shrink-0">
-            <X className="w-3.5 h-3.5" />
-          </button>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* Día tags — primary, shown flat */}
+      {diaTags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {diaTags.map(tag => <TagPill key={tag.id} tag={tag} />)}
+        </div>
+      )}
+      {diaTags.length === 0 && !creating && (
+        <p className="text-xs text-slate-400 italic">No hay etiquetas de día. Crea una con el botón de abajo o en Ajustes.</p>
+      )}
+
+      {/* Secondary groups under subtle dividers */}
+      {otherGroups.map(({ cat, label: groupLabel, Icon, group }) => (
+        <div key={cat}>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <div className="h-px flex-1 bg-slate-100" />
+            <Icon className="w-3 h-3 text-slate-300" />
+            <span className="text-[10px] text-slate-400">{groupLabel}</span>
+            <div className="h-px flex-1 bg-slate-100" />
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {group.map(tag => <TagPill key={tag.id} tag={tag} />)}
+          </div>
+        </div>
+      ))}
+
+      {/* Create new */}
+      {creating ? (
+        <div className="flex flex-wrap items-center gap-1.5 p-2.5 bg-slate-50 rounded-xl border border-slate-200">
+          <input ref={ref} value={label} onChange={e => setLabel(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); create(); } if (e.key === 'Escape') setCreating(false); }}
+            placeholder="Nombre de la etiqueta"
+            className="w-32 bg-transparent text-sm text-slate-700 placeholder-slate-400 outline-none min-w-0" />
+          <div className="flex gap-0.5">
+            {TAG_CATEGORY_KEYS.map(cat => { const I = CAT_ICONS[cat]; return (
+              <button key={cat} type="button" title={TAG_CATEGORIES[cat].label} onClick={() => setNewCat(cat)}
+                className={`p-1 rounded ${newCat === cat ? 'bg-blue-100 text-blue-600' : 'text-slate-300 hover:text-slate-500'}`}>
+                <I className="w-3.5 h-3.5" />
+              </button>
+            ); })}
+          </div>
+          <div className="flex gap-1">
+            {COLOR_CYCLE.map(col => (
+              <button key={col} type="button" onClick={() => setColor(col)}
+                className={`w-4 h-4 rounded-full ${TAG_COLORS[col].bg} ${color === col ? 'scale-125 ring-2 ring-offset-1 ring-slate-300' : 'opacity-50 hover:opacity-100'}`} />
+            ))}
+          </div>
+          <button type="button" onClick={create} disabled={!label.trim()} className={`px-2.5 py-1 rounded-lg text-xs font-bold text-white disabled:opacity-40 ${TAG_COLORS[color]?.bg || 'bg-blue-500'}`}>Añadir</button>
+          <button type="button" onClick={() => setCreating(false)} className="text-slate-400 hover:text-slate-600"><X className="w-3.5 h-3.5" /></button>
         </div>
       ) : (
         <button type="button" onClick={() => setCreating(true)}
