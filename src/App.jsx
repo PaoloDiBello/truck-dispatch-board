@@ -9,6 +9,7 @@ import { CellContent } from './components/CellContent';
 import { TrucksModal } from './components/TrucksModal';
 import { SettingsModal } from './components/SettingsModal';
 import { ConfirmDialog } from './components/ConfirmDialog';
+import { RemindersPanel } from './components/RemindersPanel';
 import { DAYS_ES, DEFAULT_TAGS, DEFAULT_VEHICLES } from './constants';
 import { uid, formatDateFull, getWeekDates, toISODate, isSameDay } from './utils';
 import {
@@ -18,6 +19,7 @@ import {
   fetchTags, insertTag, deleteTag as dbDeleteTag,
   fetchSetting, upsertSetting,
 } from './lib/db';
+import { subtractMinutesFromDateTime, formatDuration } from './utils';
 
 export default function App() {
   const [vehicles, setVehicles]           = useState([]);
@@ -32,6 +34,7 @@ export default function App() {
   const [showTrucks, setShowTrucks]       = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
+  const [showReminders, setShowReminders]   = useState(false);
   const [loading, setLoading]             = useState(true);
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [toast, setToast]                 = useState(null);
@@ -91,32 +94,45 @@ export default function App() {
       const currentTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
       const today = toISODate(now);
       const newNotifs = [];
+
       routes.forEach(r => {
-        if (
-          r.arrival_date === today &&
-          r.arrival_time <= currentTime &&
-          !notifiedIds.current.has(r.id) &&
-          r.origin && r.destination
-        ) {
-          notifiedIds.current.add(r.id);
-          const vehicle = vehicles.find(v => v.id === r.vehicle_id);
-          const notif = {
-            id: r.id,
-            vehicleId: r.vehicle_id,
-            vehicle: vehicle?.plate || 'Camión',
-            driver: vehicle?.driver || '',
-            route: `${r.origin} → ${r.destination}`,
-            time: r.arrival_time,
-          };
-          newNotifs.push(notif);
-          if ('Notification' in window && Notification.permission === 'granted') {
-            new Notification(`Llegada estimada · ${notif.vehicle}`, {
-              body: `${notif.route}\nHora prevista: ${notif.time}${notif.driver ? ` · ${notif.driver}` : ''}`,
-              icon: '/favicon.ico',
-            });
+        if (!r.origin || !r.destination) return;
+        const vehicle = vehicles.find(v => v.id === r.vehicle_id);
+
+        // Reminder items (new array format + backward compat with old {departure,arrival} format)
+        const reminderItems = (() => {
+          const rem = r.reminder;
+          if (!rem) return [];
+          if (Array.isArray(rem.items)) return rem.items;
+          const legacy = [];
+          if (rem.departure?.enabled && r.departure_date && r.departure_time)
+            legacy.push({ id: `dep_${r.id}`, type: 'departure', minutesBefore: rem.departure.minutesBefore ?? 15 });
+          if (rem.arrival?.enabled && r.arrival_date && r.arrival_time)
+            legacy.push({ id: `arr_${r.id}`, type: 'arrival', minutesBefore: rem.arrival.minutesBefore ?? 0 });
+          return legacy;
+        })();
+
+        reminderItems.forEach(item => {
+          const isDep  = item.type === 'departure';
+          const eDate  = isDep ? r.departure_date : r.arrival_date;
+          const eTime  = isDep ? r.departure_time : r.arrival_time;
+          if (!eDate || !eTime) return;
+          const trigger = subtractMinutesFromDateTime(eDate, eTime, item.minutesBefore ?? 0);
+          const notifId = `rem_${r.id}_${item.id}`;
+          if (trigger?.date === today && trigger.time <= currentTime && !notifiedIds.current.has(notifId)) {
+            notifiedIds.current.add(notifId);
+            const offset = item.minutesBefore ?? 0;
+            const notif  = { id: notifId, vehicleId: r.vehicle_id, vehicle: vehicle?.plate || 'Camión', driver: vehicle?.driver || '', route: `${r.origin} → ${r.destination}`, time: eTime, type: item.type, minutesBefore: offset };
+            newNotifs.push(notif);
+            if ('Notification' in window && Notification.permission === 'granted') {
+              const label = item.label || (isDep ? 'Salida' : 'Llegada');
+              const title = offset > 0 ? `${label} en ${formatDuration(offset)} · ${notif.vehicle}` : `${label} · ${notif.vehicle}`;
+              new Notification(title, { body: `${notif.route}\n${eTime}${notif.driver ? ` · ${notif.driver}` : ''}`, icon: '/favicon.ico' });
+            }
           }
-        }
+        });
       });
+
       if (newNotifs.length > 0) {
         setNotifications(p => [...p, ...newNotifs]);
         setShowNotifPanel(true);
@@ -341,7 +357,11 @@ export default function App() {
               className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg hover:border-blue-400 hover:text-blue-600 text-sm font-medium transition">
               <Truck className="w-4 h-4" /><span className="hidden sm:inline">Gestionar flota</span>
             </button>
-            {/* Test notification + badge */}
+            <button onClick={() => setShowReminders(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg hover:border-amber-400 hover:text-amber-600 text-sm font-medium transition">
+              <Bell className="w-4 h-4" /><span className="hidden sm:inline">Recordatorios</span>
+            </button>
+            {/* Notification badge */}
             <button
               onClick={() => setShowNotifPanel(p => !p)}
               className="relative p-2 hover:bg-slate-100 rounded-lg transition text-slate-400 hover:text-amber-500" title="Notificaciones">
@@ -514,6 +534,16 @@ export default function App() {
       </div>
 
 
+      {/* REMINDERS PANEL */}
+      {showReminders && (
+        <RemindersPanel
+          routes={routes}
+          vehicles={vehicles}
+          onRouteUpdate={updateRouteById}
+          onClose={() => setShowReminders(false)}
+        />
+      )}
+
       {/* NOTIFICATION PANEL */}
       {showNotifPanel && (
         <div className="fixed top-16 right-4 z-50 w-[420px] bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
@@ -537,13 +567,21 @@ export default function App() {
             <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
               {notifications.map(n => (
                 <div key={n.id} className="p-3 flex items-start gap-3 hover:bg-slate-50 transition">
-                  <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <Bell className="w-3.5 h-3.5 text-emerald-600" />
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${n.type === 'departure' ? 'bg-blue-100' : 'bg-emerald-100'}`}>
+                    {n.type === 'departure'
+                      ? <ArrowRight className="w-3.5 h-3.5 text-blue-600" />
+                      : <Bell className="w-3.5 h-3.5 text-emerald-600" />
+                    }
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="font-bold text-sm text-slate-800">{n.vehicle}{n.driver && <span className="font-normal text-slate-500"> · {n.driver}</span>}</div>
                     <div className="text-xs text-slate-600 mt-0.5 break-words">{n.route}</div>
-                    <div className="text-xs text-emerald-700 font-semibold mt-1">Hora prevista: {n.time}</div>
+                    <div className={`text-xs font-semibold mt-1 ${n.type === 'departure' ? 'text-blue-700' : 'text-emerald-700'}`}>
+                      {n.type === 'departure'
+                        ? (n.minutesBefore > 0 ? `Salida en ${formatDuration(n.minutesBefore)} · ${n.time}` : `Salida: ${n.time}`)
+                        : (n.minutesBefore > 0 ? `Llegada en ${formatDuration(n.minutesBefore)} · ${n.time}` : `Llegada prevista: ${n.time}`)
+                      }
+                    </div>
                   </div>
                   <button onClick={() => dismissNotif(n.id)} className="text-slate-300 hover:text-red-400 transition flex-shrink-0 mt-0.5"><X className="w-3.5 h-3.5" /></button>
                 </div>

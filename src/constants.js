@@ -1,6 +1,16 @@
 export const MAX_SPEED = 90;
-export const DRIVING_BEFORE_BREAK = 4 * 60;
+export const DRIVING_BEFORE_BREAK = 4.5 * 60; // 270 min — Regl. CE 561/2006
 export const BREAK_DURATION = 45;
+export const DAILY_MAX_DRIVING  = 9 * 60;   // 540 min estándar
+export const DAILY_EXT_DRIVING  = 10 * 60;  // 600 min ampliado (máx. 2×/sem)
+export const REMINDER_OPTIONS = [
+  { value: 0,   label: 'En el momento' },
+  { value: 15,  label: '15 min antes'  },
+  { value: 30,  label: '30 min antes'  },
+  { value: 60,  label: '1 h antes'     },
+  { value: 120, label: '2 h antes'     },
+  { value: 240, label: '4 h antes'     },
+];
 export const DAYS_ES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
 export const TAG_COLORS = {

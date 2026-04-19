@@ -5,9 +5,9 @@ import {
   Plus, Trash2, X, Clock, MapPin, Euro, Package, Phone, Building2,
   Truck, Calendar, Edit2, AlertCircle, ArrowRight, Calculator,
   StickyNote, User, Navigation, ChevronDown, Check, CheckCircle2,
-  Tag as TagIcon, Save, CalendarDays,
+  Tag as TagIcon, Save, CalendarDays, Bell,
 } from 'lucide-react';
-import { TAG_COLORS, COLOR_CYCLE, TAG_CATEGORIES, TAG_CATEGORY_KEYS } from '../constants';
+import { TAG_COLORS, COLOR_CYCLE, TAG_CATEGORIES, TAG_CATEGORY_KEYS, MAX_SPEED, DRIVING_BEFORE_BREAK, BREAK_DURATION, DAILY_MAX_DRIVING, DAILY_EXT_DRIVING } from '../constants';
 
 const CAT_ICONS = { vehiculo: Truck, ruta: Package, dia: CalendarDays };
 import { uid, formatDateFull, toISODate, daysBetween, calculateDrivingTime, formatDuration, addMinutesToDateTime, getRouteDistance } from '../utils';
@@ -27,7 +27,7 @@ export function CellEditor({
   onClose,
 }) {
   const [activeTab, setActiveTab]       = useState('routes');
-  const [editingRoute, setEditingRoute] = useState(null); // null | 'new' | routeId
+  const [editingRoute, setEditingRoute] = useState(null);
   const [noteForm, setNoteForm]         = useState({ notes: dayNote?.notes || '', tags: dayNote?.tags || [] });
   const [savingNote, setSavingNote]     = useState(false);
   const [localNewTags, setLocalNewTags] = useState([]);
@@ -89,7 +89,6 @@ export function CellEditor({
             </button>
           </div>
 
-          {/* Tabs — flush to bottom, white bg so they merge with content */}
           <div className="flex px-6 gap-0">
             <TabBtn active={activeTab === 'routes'} onClick={() => setActiveTab('routes')}>
               <MapPin className="w-3.5 h-3.5" />
@@ -150,7 +149,6 @@ export function CellEditor({
                 )}
               </div>
 
-              {/* Empty state */}
               {allActive.length === 0 && editingRoute !== 'new' && (
                 <button type="button" onClick={() => setEditingRoute('new')}
                   className="w-full py-8 border-2 border-dashed border-slate-200 rounded-xl hover:border-blue-300 hover:bg-blue-50/40 transition group text-center">
@@ -164,7 +162,6 @@ export function CellEditor({
                 </button>
               )}
 
-              {/* Route cards / forms */}
               {allActive.map(route =>
                 editingRoute === route.id
                   ? <RouteForm key={route.id} route={route} date={date} apiKey={apiKey}
@@ -182,7 +179,6 @@ export function CellEditor({
                   onSave={async (data) => { await onRouteCreate(data); setEditingRoute(null); }}
                   onCancel={() => setEditingRoute(null)} />
               )}
-
             </div>
           )}
 
@@ -207,7 +203,6 @@ export function CellEditor({
                   onDeleteTag={handleTagDelete}
                 />
               </div>
-
               <div>
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                   <StickyNote className="w-3 h-3" /> Notas
@@ -221,7 +216,6 @@ export function CellEditor({
                   autoFocus
                 />
               </div>
-
             </div>
           )}
         </div>
@@ -250,9 +244,7 @@ function TabBtn({ active, onClick, children }) {
   return (
     <button type="button" onClick={onClick}
       className={`flex items-center gap-1.5 px-5 py-2.5 text-sm font-semibold transition-all rounded-t-xl ${
-        active
-          ? 'bg-white text-blue-700'
-          : 'text-blue-200 hover:text-white hover:bg-white/10'
+        active ? 'bg-white text-blue-700' : 'text-blue-200 hover:text-white hover:bg-white/10'
       }`}>
       {children}
     </button>
@@ -260,10 +252,9 @@ function TabBtn({ active, onClick, children }) {
 }
 
 // ─── ROUTE CARD ───────────────────────────────────────────────────────────────
-
 const SPAN_CFG = {
-  departure: { label: 'Salida',  chipCls: 'bg-blue-100 text-blue-700',    dot: 'bg-blue-500'    },
-  transit:   { label: 'En ruta', chipCls: 'bg-amber-100 text-amber-700',  dot: 'bg-amber-500'   },
+  departure: { label: 'Salida',  chipCls: 'bg-blue-100 text-blue-700',       dot: 'bg-blue-500'    },
+  transit:   { label: 'En ruta', chipCls: 'bg-amber-100 text-amber-700',     dot: 'bg-amber-500'   },
   arrival:   { label: 'Llegada', chipCls: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
 };
 
@@ -271,47 +262,44 @@ function RouteCard({ route, savedTags, onEdit, onDelete }) {
   const cfg    = SPAN_CFG[route._spanType] || SPAN_CFG.departure;
   const isMulti = route.departure_date && route.arrival_date && route.departure_date !== route.arrival_date;
   const tags   = (route.tags || []).map(id => savedTags.find(t => t.id === id)).filter(Boolean);
+  const hasReminder = (() => {
+    const rem = route.reminder;
+    if (!rem) return false;
+    if (Array.isArray(rem.items)) return rem.items.length > 0;
+    return rem.departure?.enabled || rem.arrival?.enabled;
+  })();
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-      {/* Card header bar */}
       <div className="flex items-center justify-between px-4 py-2 bg-slate-50 border-b border-slate-100">
         <div className="flex items-center gap-2 min-w-0">
           <span className={`flex-shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full ${cfg.chipCls}`}>
             {cfg.label}
           </span>
-          {route.title && (
-            <span className="text-xs font-semibold text-slate-600 truncate">{route.title}</span>
-          )}
+          {route.title && <span className="text-xs font-semibold text-slate-600 truncate">{route.title}</span>}
           {isMulti && (
             <span className="flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">
               {daysBetween(route.departure_date, route.arrival_date) + 1} días
             </span>
           )}
+          {hasReminder && <Bell className="w-3 h-3 text-amber-500 flex-shrink-0" title="Recordatorio activo" />}
         </div>
         <div className="flex items-center gap-0.5 flex-shrink-0">
-          <button onClick={onEdit}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition">
+          <button onClick={onEdit} className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition">
             <Edit2 className="w-3 h-3" /> Editar
           </button>
-          <button onClick={onDelete}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition">
+          <button onClick={onDelete} className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition">
             <Trash2 className="w-3 h-3" /> Borrar
           </button>
         </div>
       </div>
-
-      {/* Card body */}
       <div className="px-4 py-3">
-        {/* Route: origin → destination */}
         <div className="flex items-center gap-2 mb-2">
           <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cfg.dot}`} />
           <span className="text-sm font-semibold text-slate-800 truncate">{route.origin || '—'}</span>
           <ArrowRight className="w-3.5 h-3.5 text-slate-300 flex-shrink-0" />
           <span className="text-sm font-semibold text-slate-800 truncate">{route.destination || '—'}</span>
         </div>
-
-        {/* Departure + Arrival on same row */}
         <div className="flex items-center gap-4 text-xs mb-2">
           <span className="flex items-center gap-1.5 text-slate-500">
             <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
@@ -328,8 +316,6 @@ function RouteCard({ route, savedTags, onEdit, onDelete }) {
             </span>
           )}
         </div>
-
-        {/* Distance / company / tags */}
         {(route.distance_km != null || route.company?.name || tags.length > 0) && (
           <div className="flex items-center gap-2 flex-wrap">
             {route.distance_km != null && (
@@ -364,15 +350,19 @@ function RouteForm({ route, date, apiKey, allTags, onTagCreate, onTagDelete, onS
     arrival_date:   toISODate(date), arrival_time: '',
     distance_km: null, estimated_minutes: null, source: null,
     company: {}, tags: [],
+    reminder: { items: [] },
   };
 
   const { register, handleSubmit, watch, setValue, getValues, formState: { errors } } = useForm({ defaultValues: def });
   const [calculating, setCalculating] = useState(false);
+  const [calcPreview, setCalcPreview] = useState(null);
   const [calcError, setCalcError]     = useState(null);
   const [saving, setSaving]           = useState(false);
   const [showCompany, setShowCompany] = useState(!!(route?.company?.name || route?.company?.price));
+  const [showLaw, setShowLaw]         = useState(false);
 
   const depDate    = watch('departure_date');
+  const depTime    = watch('departure_time');
   const distKm     = watch('distance_km');
   const estMins    = watch('estimated_minutes');
   const src        = watch('source');
@@ -380,19 +370,22 @@ function RouteForm({ route, date, apiKey, allTags, onTagCreate, onTagDelete, onS
   const price      = watch('company.price');
   const totalKm    = Number(distKm) || 0;
   const pricePerKm = totalKm > 0 && price ? (parseFloat(price) / totalKm).toFixed(2) : null;
-
   const calcRoute = async () => {
     const o = getValues('origin'), d = getValues('destination');
     if (!o || !d) { setCalcError('Introduce origen y destino primero'); return; }
-    setCalculating(true); setCalcError(null);
+    setCalculating(true); setCalcError(null); setCalcPreview(null);
     const res = await getRouteDistance(o, d, apiKey);
     if (res) {
       const mins = calculateDrivingTime(res.distanceKm);
       setValue('distance_km', res.distanceKm);
       setValue('estimated_minutes', mins);
       setValue('source', res.source);
-      const arr = addMinutesToDateTime(getValues('departure_date'), getValues('departure_time'), mins);
+      const dDate = getValues('departure_date');
+      const dTime = getValues('departure_time');
+      const arr = addMinutesToDateTime(dDate, dTime, mins);
+      // Auto-apply arrival if departure time is set
       if (arr) { setValue('arrival_date', arr.date); setValue('arrival_time', arr.time); }
+      setCalcPreview({ distanceKm: res.distanceKm, estimatedMinutes: mins, source: res.source, depDate: dDate, depTime: dTime, arrDate: arr?.date || null, arrTime: arr?.time || null });
     } else {
       setCalcError('No se pudo localizar alguna ciudad');
     }
@@ -409,12 +402,27 @@ function RouteForm({ route, date, apiKey, allTags, onTagCreate, onTagDelete, onS
       distance_km: d.distance_km, estimated_minutes: d.estimated_minutes, source: d.source,
       company: { ...d.company, pricePerKm },
       tags: d.tags || [],
+      reminder: route?.reminder || { items: [] },
     });
     setSaving(false);
   };
 
+  // Compliance analysis
+  const compliance = distKm ? (() => {
+    const km = Number(distKm);
+    const pureMins    = Math.round((km / MAX_SPEED) * 60);
+    const breaksCount = Math.floor(pureMins / DRIVING_BEFORE_BREAK);
+    const breaksMins  = breaksCount * BREAK_DURATION;
+    let status = 'ok';
+    if (pureMins > DAILY_EXT_DRIVING) status = 'exceeded';
+    else if (pureMins > DAILY_MAX_DRIVING) status = 'extended';
+    return { km, pureMins, breaksCount, breaksMins, totalMins: pureMins + breaksMins, status };
+  })() : null;
+
   return (
     <div className="rounded-xl border-2 border-blue-300 overflow-hidden">
+      {showLaw && <LawInfoModal onClose={() => setShowLaw(false)} />}
+
       <div className="flex items-center justify-between px-4 py-2.5 bg-blue-600">
         <span className="text-sm font-bold text-white">{isNew ? '+ Nueva ruta' : 'Editar ruta'}</span>
         <button type="button" onClick={onCancel} className="text-blue-200 hover:text-white hover:bg-white/20 rounded-lg p-1 transition">
@@ -484,29 +492,31 @@ function RouteForm({ route, date, apiKey, allTags, onTagCreate, onTagDelete, onS
           </div>
         </div>
 
-        {/* Calculate */}
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-3 flex-wrap">
-            <button type="button" onClick={calcRoute} disabled={calculating}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-40 font-medium transition">
-              <Calculator className="w-3.5 h-3.5" />{calculating ? 'Calculando…' : 'Calcular ruta'}
-            </button>
-            {distKm != null && (
-              <div className="flex items-center gap-2 text-sm text-slate-700">
-                <span className="font-bold">{distKm} km</span>
-                <span className="text-slate-300">·</span>
-                <span className="text-slate-500">{formatDuration(estMins)}</span>
-                {src === 'APROX' && <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[11px] font-bold">APROX</span>}
-              </div>
-            )}
+        {/* ── CALCULATE BUTTON ── */}
+        <button type="button" onClick={calcRoute} disabled={calculating}
+          className="w-full flex items-center justify-center gap-2 py-2.5 text-sm border-2 border-dashed border-blue-200 text-blue-600 hover:border-blue-400 hover:bg-blue-50 rounded-xl font-semibold transition disabled:opacity-40">
+          <Calculator className="w-4 h-4" />
+          {calculating ? 'Calculando…' : 'Calcular distancia y horario de llegada'}
+        </button>
+
+        {/* ── CALC PREVIEW CARD ── */}
+        {calcPreview && (
+          <CalcResultCard
+            preview={calcPreview}
+            onDismiss={() => setCalcPreview(null)}
+          />
+        )}
+
+        {calcError && (
+          <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2.5">
+            <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />{calcError}
           </div>
-          {calcError && (
-            <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />{calcError}
-            </div>
-          )}
-          <p className="text-[11px] text-slate-400">Calcula distancia y estima hora de llegada · máx. 90 km/h · pausa 45 min / 4 h</p>
-        </div>
+        )}
+
+        {/* ── COMPLIANCE STRIP ── */}
+        {compliance && (
+          <ComplianceStrip compliance={compliance} onShowLaw={() => setShowLaw(true)} />
+        )}
 
         {/* Etiquetas */}
         <div>
@@ -570,8 +580,217 @@ function RouteForm({ route, date, apiKey, allTags, onTagCreate, onTagDelete, onS
   );
 }
 
-// ─── INLINE TAG PICKER (route form) — categories, ruta first ─────────────────
 
+// ─── CALC RESULT CARD ─────────────────────────────────────────────────────────
+function CalcResultCard({ preview, onDismiss }) {
+  const { distanceKm, estimatedMinutes, source, depDate, depTime, arrDate, arrTime } = preview;
+  const pureMins    = Math.round((distanceKm / MAX_SPEED) * 60);
+  const breaksCount = Math.floor(pureMins / DRIVING_BEFORE_BREAK);
+  const breaksMins  = breaksCount * BREAK_DURATION;
+
+  const fmtDT = (dateStr, timeStr) => {
+    if (!dateStr || !timeStr) return null;
+    const d = new Date(dateStr + 'T00:00:00');
+    const days = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+    return `${days[d.getDay()]} ${formatDateFull(d)} · ${timeStr}`;
+  };
+
+  return (
+    <div className="rounded-xl bg-blue-50 border border-blue-200 overflow-hidden">
+      <div className="px-4 py-2.5 bg-blue-600 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-white font-bold text-sm">
+          <Calculator className="w-3.5 h-3.5" />
+          Resultado
+          {source === 'APROX' && <span className="px-1.5 py-0.5 rounded-full bg-white/20 text-[11px] font-bold">ESTIMADO</span>}
+        </div>
+        <button type="button" onClick={onDismiss} className="text-white/60 hover:text-white transition p-1">
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      <div className="p-3 space-y-3">
+        {/* Stats row */}
+        <div className="flex items-center gap-3">
+          <div className="text-center flex-shrink-0 bg-white rounded-xl px-3 py-2 border border-blue-200">
+            <div className="text-2xl font-black text-blue-700 leading-none">{distanceKm}</div>
+            <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wide">km</div>
+          </div>
+          <div className="flex-1 space-y-1 text-xs">
+            <div className="flex justify-between text-slate-600">
+              <span>Conducción <span className="text-slate-400">({distanceKm}÷{MAX_SPEED}×60)</span></span>
+              <span className="font-semibold">{formatDuration(pureMins)}</span>
+            </div>
+            {breaksCount > 0 && (
+              <div className="flex justify-between text-amber-700">
+                <span>{breaksCount}× pausa reglamentaria (45 min c/u)</span>
+                <span className="font-semibold">+{formatDuration(breaksMins)}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-slate-800 font-bold border-t border-blue-200 pt-1">
+              <span>Total</span>
+              <span>{formatDuration(estimatedMinutes)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Timeline */}
+        {depDate && depTime ? (
+          <div className="rounded-xl bg-white border border-slate-200 overflow-hidden">
+            <div className="flex items-stretch gap-3 px-3 py-2.5">
+              <div className="flex flex-col items-center gap-0.5 pt-1">
+                <div className="w-2.5 h-2.5 rounded-full bg-slate-400 flex-shrink-0" />
+                <div className="w-px flex-1 bg-slate-200 min-h-[18px]" />
+                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 flex-shrink-0" />
+              </div>
+              <div className="flex-1 space-y-2.5">
+                <div>
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Salida</div>
+                  <div className="text-sm font-semibold text-slate-800">{fmtDT(depDate, depTime)}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Llegada estimada</div>
+                  {arrDate && arrTime
+                    ? <div className="text-sm font-semibold text-slate-800">{fmtDT(arrDate, arrTime)}</div>
+                    : <div className="text-xs text-slate-400 italic">—</div>
+                  }
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+            <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+            Introduce hora de salida para calcular la llegada estimada
+          </div>
+        )}
+
+        {/* Applied confirmation / prompt */}
+        {arrDate && arrTime ? (
+          <div className="flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2.5 font-semibold">
+            <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+            Llegada aplicada: {arrDate} · {arrTime}
+          </div>
+        ) : depDate && depTime ? null : (
+          <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+            <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+            Introduce hora de salida para calcular y aplicar la llegada
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── COMPLIANCE STRIP ─────────────────────────────────────────────────────────
+function ComplianceStrip({ compliance, onShowLaw }) {
+  const { pureMins, breaksCount, breaksMins, totalMins, status } = compliance;
+  const cfg = {
+    ok:       { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', badge: 'bg-emerald-100 text-emerald-700', icon: <CheckCircle2 className="w-3.5 h-3.5" />, label: 'Dentro del límite diario' },
+    extended: { bg: 'bg-amber-50',   border: 'border-amber-200',   text: 'text-amber-700',   badge: 'bg-amber-100 text-amber-700',   icon: <AlertCircle  className="w-3.5 h-3.5" />, label: 'Jornada ampliada (>9h, máx. 2×/sem)' },
+    exceeded: { bg: 'bg-red-50',     border: 'border-red-200',     text: 'text-red-700',     badge: 'bg-red-100 text-red-700',       icon: <AlertCircle  className="w-3.5 h-3.5" />, label: 'Excede el límite ampliado (>10h)' },
+  }[status];
+
+  return (
+    <div className={`rounded-xl border ${cfg.border} ${cfg.bg} px-3 py-2.5`}>
+      <div className="flex items-center gap-2">
+        <span className={cfg.text}>{cfg.icon}</span>
+        <span className={`text-xs font-semibold ${cfg.text}`}>{cfg.label}</span>
+        <button type="button" onClick={onShowLaw}
+          className="ml-auto flex items-center gap-1 text-[11px] text-slate-400 hover:text-blue-600 transition font-medium">
+          <AlertCircle className="w-3 h-3" /> CE 561/2006
+        </button>
+      </div>
+      <div className="mt-2 grid grid-cols-4 gap-2 text-[11px]">
+        <div className="bg-white/70 rounded-lg px-2 py-1.5 text-center">
+          <div className="font-black text-slate-700">{formatDuration(pureMins)}</div>
+          <div className="text-slate-400">conducción</div>
+        </div>
+        <div className="bg-white/70 rounded-lg px-2 py-1.5 text-center">
+          <div className={`font-black ${breaksCount > 0 ? 'text-amber-600' : 'text-slate-400'}`}>
+            {breaksCount > 0 ? `${breaksCount}× 45min` : '—'}
+          </div>
+          <div className="text-slate-400">pausas</div>
+        </div>
+        <div className="bg-white/70 rounded-lg px-2 py-1.5 text-center">
+          <div className="font-black text-slate-700">{formatDuration(totalMins)}</div>
+          <div className="text-slate-400">total viaje</div>
+        </div>
+        <div className="bg-white/70 rounded-lg px-2 py-1.5 text-center">
+          <div className="font-black text-indigo-600">9h min</div>
+          <div className="text-slate-400">descanso</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── LAW INFO MODAL ───────────────────────────────────────────────────────────
+function LawInfoModal({ onClose }) {
+  const sections = [
+    { icon: <AlertCircle className="w-4 h-4 text-red-500" />, title: 'Pausa obligatoria', items: [
+      'Tras 4 h 30 min de conducción continua — pausa de 45 min',
+      'Puede dividirse: 15 min + 30 min (en ese orden)',
+      'No sustituible por el descanso diario',
+    ]},
+    { icon: <Truck className="w-4 h-4 text-blue-500" />, title: 'Conducción diaria', items: [
+      'Estándar: máximo 9 h al día',
+      'Ampliado: hasta 10 h — máximo 2 veces por semana',
+      'Solo cuenta el tiempo real al volante',
+    ]},
+    { icon: <Clock className="w-4 h-4 text-indigo-500" />, title: 'Descanso diario', items: [
+      'Minimo 11 h consecutivas entre jornadas',
+      'Reducido: mínimo 9 h — permitido hasta 3 veces por semana (sin compensación)',
+      'Esta app usa 9 h como valor por defecto para el cálculo de descanso',
+    ]},
+    { icon: <Calendar className="w-4 h-4 text-slate-500" />, title: 'Conducción semanal', items: [
+      'Máximo 56 h en una semana (lunes 00:00 a domingo 24:00)',
+      'Máximo 90 h en dos semanas consecutivas',
+    ]},
+    { icon: <CheckCircle2 className="w-4 h-4 text-emerald-500" />, title: 'Descanso semanal', items: [
+      'Ordinario: mínimo 45 h consecutivas',
+      'Reducido: mínimo 24 h — compensación en las 3 semanas siguientes',
+    ]},
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col" style={{ maxHeight: '90vh' }} onClick={e => e.stopPropagation()}>
+        <header className="px-6 py-4 bg-gradient-to-r from-slate-700 to-slate-800 flex items-center justify-between flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center">
+              <AlertCircle className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <div className="font-bold text-white">Reglamento CE nº 561/2006</div>
+              <div className="text-xs text-slate-300">Tiempos de conducción y descanso · UE 2020/1054</div>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-xl transition"><X className="w-5 h-5 text-white" /></button>
+        </header>
+        <div className="overflow-y-auto p-5 space-y-3">
+          {sections.map(({ icon, title, items }) => (
+            <div key={title} className="rounded-xl border border-slate-200 overflow-hidden">
+              <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 flex items-center gap-2 font-bold text-slate-700 text-xs uppercase tracking-wider">
+                {icon}{title}
+              </div>
+              <ul className="px-4 py-3 space-y-1.5">
+                {items.map((item, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-slate-600">
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-300 flex-shrink-0 mt-2" />{item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+          <p className="text-xs text-slate-400 text-center pt-1">
+            Fuente: eur-lex.europa.eu · Regl. (CE) 561/2006 y (UE) 2020/1054
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── INLINE TAG PICKER ────────────────────────────────────────────────────────
 function InlineTagPicker({ allTags, selectedIds, onToggle, onTagCreate, onTagDelete }) {
   const [creating, setCreating] = useState(false);
   const [label, setLabel]       = useState('');
@@ -588,9 +807,8 @@ function InlineTagPicker({ allTags, selectedIds, onToggle, onTagCreate, onTagDel
     setLabel(''); setColor('blue'); setCreating(false);
   };
 
-  // Route form: ruta tags flat, vehiculo tags under divider — dia tags not shown here
-  const rutaTags  = allTags.filter(t => (t.category || 'ruta') === 'ruta');
-  const otherCats = [{ cat: 'vehiculo', cfg: TAG_CATEGORIES.vehiculo, Icon: CAT_ICONS.vehiculo, group: allTags.filter(t => (t.category || 'ruta') === 'vehiculo') }].filter(x => x.group.length > 0);
+  const rutaTags     = allTags.filter(t => (t.category || 'ruta') === 'ruta');
+  const vehiculoTags = allTags.filter(t => (t.category || 'ruta') === 'vehiculo');
 
   const TagPill = ({ tag }) => {
     const c = TAG_COLORS[tag.color] || TAG_COLORS.slate;
@@ -612,34 +830,33 @@ function InlineTagPicker({ allTags, selectedIds, onToggle, onTagCreate, onTagDel
 
   return (
     <div className="space-y-2.5">
-      {/* Primary: ruta tags — no heading needed */}
-      {rutaTags.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {rutaTags.map(tag => <TagPill key={tag.id} tag={tag} />)}
+      {(vehiculoTags.length > 0 || rutaTags.length > 0) && (
+        <div className="grid grid-cols-2 gap-3">
+          {vehiculoTags.length > 0 && (
+            <div>
+              <div className="flex items-center gap-1 mb-1.5">
+                <Truck className="w-3 h-3 text-slate-300" />
+                <span className="text-[10px] text-slate-400 font-medium">{TAG_CATEGORIES.vehiculo.label}</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">{vehiculoTags.map(tag => <TagPill key={tag.id} tag={tag} />)}</div>
+            </div>
+          )}
+          {rutaTags.length > 0 && (
+            <div>
+              <div className="flex items-center gap-1 mb-1.5">
+                <Package className="w-3 h-3 text-slate-300" />
+                <span className="text-[10px] text-slate-400 font-medium">{TAG_CATEGORIES.ruta?.label || 'Ruta'}</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">{rutaTags.map(tag => <TagPill key={tag.id} tag={tag} />)}</div>
+            </div>
+          )}
         </div>
       )}
-
-      {/* Secondary: other categories under subtle dividers */}
-      {otherCats.map(({ cat, cfg, Icon, group }) => (
-        <div key={cat}>
-          <div className="flex items-center gap-1.5 mb-1.5">
-            <div className="h-px flex-1 bg-slate-100" />
-            <Icon className="w-3 h-3 text-slate-300" />
-            <span className="text-[10px] text-slate-400 font-medium">{cfg.label}</span>
-            <div className="h-px flex-1 bg-slate-100" />
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {group.map(tag => <TagPill key={tag.id} tag={tag} />)}
-          </div>
-        </div>
-      ))}
-
       {creating ? (
         <div className="flex flex-wrap items-center gap-1.5 px-2.5 py-2 bg-slate-50 rounded-xl border border-slate-200">
           <input ref={ref} value={label} onChange={e => setLabel(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); create(); } if (e.key === 'Escape') setCreating(false); }}
             placeholder="Nombre" className="w-24 bg-transparent text-xs outline-none text-slate-700 placeholder-slate-400" />
-          {/* Category mini toggle */}
           <div className="flex gap-0.5">
             {TAG_CATEGORY_KEYS.map(cat => { const I = CAT_ICONS[cat]; return (
               <button key={cat} type="button" title={TAG_CATEGORIES[cat].label} onClick={() => setNewCat(cat)}
@@ -667,8 +884,7 @@ function InlineTagPicker({ allTags, selectedIds, onToggle, onTagCreate, onTagDel
   );
 }
 
-// ─── DAY-LEVEL TAG PICKER — dia + vehiculo first, ruta secondary ─────────────
-
+// ─── DAY-LEVEL TAG PICKER ─────────────────────────────────────────────────────
 function TagPicker({ savedTags, selectedIds, onSelect, onCreateAndSelect, onDeleteTag }) {
   const [creating, setCreating] = useState(false);
   const [label, setLabel]       = useState('');
@@ -685,9 +901,7 @@ function TagPicker({ savedTags, selectedIds, onSelect, onCreateAndSelect, onDele
     setLabel(''); setColor('blue'); setCreating(false);
   };
 
-  // Day notes: only dia-category tags — ruta and vehiculo tags belong on routes, not days
-  const diaTags     = savedTags.filter(t => (t.category || 'ruta') === 'dia');
-  const otherGroups = [];
+  const diaTags = savedTags.filter(t => (t.category || 'ruta') === 'dia');
 
   const TagPill = ({ tag }) => {
     const c = TAG_COLORS[tag.color] || TAG_COLORS.slate;
@@ -711,32 +925,10 @@ function TagPicker({ savedTags, selectedIds, onSelect, onCreateAndSelect, onDele
 
   return (
     <div className="space-y-3">
-      {/* Día tags — primary, shown flat */}
-      {diaTags.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {diaTags.map(tag => <TagPill key={tag.id} tag={tag} />)}
-        </div>
-      )}
-      {diaTags.length === 0 && !creating && (
-        <p className="text-xs text-slate-400 italic">No hay etiquetas de día. Crea una con el botón de abajo o en Ajustes.</p>
-      )}
-
-      {/* Secondary groups under subtle dividers */}
-      {otherGroups.map(({ cat, label: groupLabel, Icon, group }) => (
-        <div key={cat}>
-          <div className="flex items-center gap-1.5 mb-1.5">
-            <div className="h-px flex-1 bg-slate-100" />
-            <Icon className="w-3 h-3 text-slate-300" />
-            <span className="text-[10px] text-slate-400">{groupLabel}</span>
-            <div className="h-px flex-1 bg-slate-100" />
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {group.map(tag => <TagPill key={tag.id} tag={tag} />)}
-          </div>
-        </div>
-      ))}
-
-      {/* Create new */}
+      {diaTags.length > 0
+        ? <div className="flex flex-wrap gap-1.5">{diaTags.map(tag => <TagPill key={tag.id} tag={tag} />)}</div>
+        : !creating && <p className="text-xs text-slate-400 italic">No hay etiquetas de día. Crea una con el botón de abajo o en Ajustes.</p>
+      }
       {creating ? (
         <div className="flex flex-wrap items-center gap-1.5 p-2.5 bg-slate-50 rounded-xl border border-slate-200">
           <input ref={ref} value={label} onChange={e => setLabel(e.target.value)}

@@ -23,8 +23,14 @@ create table if not exists routes (
   estimated_minutes  numeric,
   source             text,
   company            jsonb not null default '{}',
+  tags               text[] not null default '{}',
+  reminder           jsonb not null default '{}',
   created_at         timestamptz not null default now()
 );
+
+-- Migration for existing installs — run once if table already exists:
+alter table routes add column if not exists tags     text[] not null default '{}';
+alter table routes add column if not exists reminder jsonb  not null default '{}';
 
 -- NEW: day-level notes/tags, separate from routes
 create table if not exists day_notes (

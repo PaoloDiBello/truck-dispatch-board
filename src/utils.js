@@ -50,6 +50,17 @@ export const formatDuration = (mins) => {
   return `${h}h ${m}min`;
 };
 
+export const subtractMinutesFromDateTime = (dateStr, timeStr, mins) => {
+  if (!dateStr || !timeStr) return null;
+  const [h, m] = timeStr.split(':').map(Number);
+  const d = new Date(dateStr);
+  d.setHours(h, m - mins, 0, 0);
+  return {
+    date: toISODate(d),
+    time: `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`,
+  };
+};
+
 export const addMinutesToDateTime = (dateStr, timeStr, mins) => {
   if (!dateStr || !timeStr || mins == null) return null;
   const [h, m] = timeStr.split(':').map(Number);
