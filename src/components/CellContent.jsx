@@ -32,7 +32,7 @@ export function CellContent({ departing, spanning, dayNote, savedTags }) {
       {dayNote?.notes && (
         <div className="flex items-start gap-1 mt-auto pt-1 border-t border-slate-100">
           <StickyNote className="w-2.5 h-2.5 text-slate-300 flex-shrink-0 mt-px" />
-          <span className="text-[10px] text-slate-400 italic line-clamp-1 leading-tight">{dayNote.notes}</span>
+          <span className="text-[10px] text-slate-400 italic line-clamp-1 leading-tight" title={dayNote.notes}>{dayNote.notes}</span>
         </div>
       )}
     </div>
@@ -65,12 +65,12 @@ function DepartureRow({ route, savedTags }) {
             {isMulti ? 'Sal.' : 'Hoy'}
           </span>
           {route.title ? (
-            <span className="text-[11px] font-semibold text-slate-700 truncate">{route.title}</span>
+            <span className="text-[11px] font-semibold text-slate-700 truncate" title={route.title}>{route.title}</span>
           ) : route.origin || route.destination ? (
             <>
-              <span className="text-[11px] font-semibold text-slate-700 truncate">{route.origin || '?'}</span>
+              <span className="text-[11px] font-semibold text-slate-700 truncate" title={route.origin || ''}>{route.origin || '?'}</span>
               <ArrowRight className="w-2.5 h-2.5 text-slate-300 flex-shrink-0" />
-              <span className="text-[11px] font-semibold text-slate-700 truncate">{route.destination || '?'}</span>
+              <span className="text-[11px] font-semibold text-slate-700 truncate" title={route.destination || ''}>{route.destination || '?'}</span>
             </>
           ) : (
             <span className="text-[11px] italic text-slate-400 truncate">Sin ubicación</span>
@@ -78,9 +78,9 @@ function DepartureRow({ route, savedTags }) {
         </div>
         {route.title && (route.origin || route.destination) && (
           <div className="flex items-center gap-1 min-w-0 mt-0.5">
-            <span className="text-[10px] text-slate-400 truncate">{route.origin || '?'}</span>
+            <span className="text-[10px] text-slate-400 truncate" title={route.origin || ""}>{route.origin || "?"}</span>
             <ArrowRight className="w-2 h-2 text-slate-300 flex-shrink-0" />
-            <span className="text-[10px] text-slate-400 truncate">{route.destination || '?'}</span>
+            <span className="text-[10px] text-slate-400 truncate" title={route.destination || ""}>{route.destination || "?"}</span>
           </div>
         )}
         <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-slate-500">
@@ -109,12 +109,12 @@ function TransitRow({ route, savedTags }) {
         <div className="flex items-center gap-1 min-w-0">
           <span className="text-[10px] font-bold px-1 py-px rounded bg-amber-100 text-amber-700 flex-shrink-0">En ruta</span>
           {route.title ? (
-            <span className="text-[11px] font-semibold text-slate-600 truncate">{route.title}</span>
+            <span className="text-[11px] font-semibold text-slate-600 truncate" title={route.title}>{route.title}</span>
           ) : route.origin || route.destination ? (
             <>
-              <span className="text-[11px] font-semibold text-slate-600 truncate">{route.origin || '?'}</span>
+              <span className="text-[11px] font-semibold text-slate-600 truncate" title={route.origin || ''}>{route.origin || '?'}</span>
               <ArrowRight className="w-2.5 h-2.5 text-slate-300 flex-shrink-0" />
-              <span className="text-[11px] font-semibold text-slate-600 truncate">{route.destination || '?'}</span>
+              <span className="text-[11px] font-semibold text-slate-600 truncate" title={route.destination || ''}>{route.destination || '?'}</span>
             </>
           ) : (
             <span className="text-[11px] italic text-slate-400 truncate">Sin ubicación</span>
@@ -122,9 +122,9 @@ function TransitRow({ route, savedTags }) {
         </div>
         {route.title && (route.origin || route.destination) && (
           <div className="flex items-center gap-1 min-w-0 mt-0.5">
-            <span className="text-[10px] text-slate-400 truncate">{route.origin || '?'}</span>
+            <span className="text-[10px] text-slate-400 truncate" title={route.origin || ""}>{route.origin || "?"}</span>
             <ArrowRight className="w-2 h-2 text-slate-300 flex-shrink-0" />
-            <span className="text-[10px] text-slate-400 truncate">{route.destination || '?'}</span>
+            <span className="text-[10px] text-slate-400 truncate" title={route.destination || ""}>{route.destination || "?"}</span>
           </div>
         )}
         {route.arrival_date && (
@@ -147,12 +147,12 @@ function ArrivalRow({ route, savedTags }) {
         <div className="flex items-center gap-1 min-w-0">
           <span className="text-[10px] font-bold px-1 py-px rounded bg-emerald-100 text-emerald-700 flex-shrink-0">Llegada</span>
           {route.title ? (
-            <span className="text-[11px] font-semibold text-slate-700 truncate">{route.title}</span>
+            <span className="text-[11px] font-semibold text-slate-700 truncate" title={route.title}>{route.title}</span>
           ) : route.origin || route.destination ? (
             <>
-              <span className="text-[11px] font-semibold text-slate-700 truncate">{route.origin || '?'}</span>
+              <span className="text-[11px] font-semibold text-slate-700 truncate" title={route.origin || ''}>{route.origin || '?'}</span>
               <ArrowRight className="w-2.5 h-2.5 text-slate-300 flex-shrink-0" />
-              <span className="text-[11px] font-semibold text-slate-700 truncate">{route.destination || '?'}</span>
+              <span className="text-[11px] font-semibold text-slate-700 truncate" title={route.destination || ''}>{route.destination || '?'}</span>
             </>
           ) : (
             <span className="text-[11px] italic text-slate-400 truncate">Sin ubicación</span>
@@ -160,9 +160,9 @@ function ArrivalRow({ route, savedTags }) {
         </div>
         {route.title && (route.origin || route.destination) && (
           <div className="flex items-center gap-1 min-w-0 mt-0.5">
-            <span className="text-[10px] text-slate-400 truncate">{route.origin || '?'}</span>
+            <span className="text-[10px] text-slate-400 truncate" title={route.origin || ""}>{route.origin || "?"}</span>
             <ArrowRight className="w-2 h-2 text-slate-300 flex-shrink-0" />
-            <span className="text-[10px] text-slate-400 truncate">{route.destination || '?'}</span>
+            <span className="text-[10px] text-slate-400 truncate" title={route.destination || ""}>{route.destination || "?"}</span>
           </div>
         )}
         {route.arrival_time && (

@@ -201,12 +201,12 @@ function RouteRow({ route, vehicle, expanded, saving, onToggle, onAdd, onRemove 
           <Truck className="w-4 h-4 text-blue-600" />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold text-slate-800 truncate">
+          <div className="text-sm font-semibold text-slate-800 truncate" title={`${route.origin || '—'} → ${route.destination || '—'}${route.title ? ` · ${route.title}` : ''}`}>
             {route.origin || '—'} <span className="text-slate-300 font-normal">→</span> {route.destination || '—'}
           </div>
-          <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500">
-            <span className="font-mono font-semibold text-slate-600">{vehicle?.plate || '—'}</span>
-            {vehicle?.driver && <span>{vehicle.driver}</span>}
+          <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500 truncate">
+            <span className="font-mono font-semibold text-slate-600" title={vehicle?.plate || ''}>{vehicle?.plate || '—'}</span>
+            {vehicle?.driver && <span className="truncate" title={vehicle.driver}>{vehicle.driver}</span>}
             {route.departure_time && <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{route.departure_time}</span>}
           </div>
         </div>
@@ -242,7 +242,7 @@ function RouteRow({ route, vehicle, expanded, saving, onToggle, onAdd, onRemove 
                   : <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
                 }
                 <div className="flex-1 min-w-0">
-                  <div className={`font-semibold ${isDep ? 'text-blue-800' : 'text-emerald-800'}`}>
+                  <div className={`font-semibold truncate ${isDep ? 'text-blue-800' : 'text-emerald-800'}`} title={item.label || (isDep ? 'Salida' : 'Llegada')}>
                     {item.label || (isDep ? 'Salida' : 'Llegada')}
                   </div>
                   <div className={`text-[11px] mt-0.5 ${isDep ? 'text-blue-500' : 'text-emerald-600'}`}>

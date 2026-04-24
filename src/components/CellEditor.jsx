@@ -16,7 +16,7 @@ import { SectionLabel, IconInput } from './primitives';
 // ─── MAIN PANEL ───────────────────────────────────────────────────────────────
 
 export function CellEditor({
-  vehicleId, date, vehicleName, driverName,
+  vehicleId, date, vehicles = [], vehicleName, driverName,
   departing, spanning, dayNote,
   savedTags, apiKey,
   arrivingRoutes = [], onDismissNotif,
@@ -165,6 +165,7 @@ export function CellEditor({
               {allActive.map(route =>
                 editingRoute === route.id
                   ? <RouteForm key={route.id} route={route} date={date} apiKey={apiKey}
+                      vehicles={vehicles} currentVehicleId={vehicleId}
                       allTags={allTags} onTagCreate={handleTagCreate} onTagDelete={handleTagDelete}
                       onSave={async (data) => { await onRouteUpdate(route.id, data); setEditingRoute(null); }}
                       onCancel={() => setEditingRoute(null)} />
@@ -175,6 +176,7 @@ export function CellEditor({
 
               {editingRoute === 'new' && (
                 <RouteForm route={null} date={date} apiKey={apiKey}
+                  vehicles={vehicles} currentVehicleId={vehicleId}
                   allTags={allTags} onTagCreate={handleTagCreate} onTagDelete={handleTagDelete}
                   onSave={async (data) => { await onRouteCreate(data); setEditingRoute(null); }}
                   onCancel={() => setEditingRoute(null)} />
@@ -185,6 +187,13 @@ export function CellEditor({
           {/* ════ TAB: NOTAS DEL DÍA ════ */}
           {activeTab === 'notes' && (
             <div className="px-6 py-5 space-y-4">
+              <div className="flex items-start gap-2.5 rounded-xl border border-blue-100 bg-blue-50/60 px-3 py-2.5">
+                <CalendarDays className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
+                <div className="text-[11px] leading-relaxed text-slate-600">
+                  <span className="font-bold text-blue-700">Anotaciones del día.</span>{' '}
+                  Contexto que pertenece a este día y no a una ruta concreta — avisos del cliente que afectan a varias rutas, relación entre cargas, incidencias del camión/conductor, festivos, ITV… <span className="text-slate-500">Si la nota solo tiene sentido dentro de una ruta, ponla en "Referencia / instrucciones" de esa ruta.</span>
+                </div>
+              </div>
               <div>
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                   <TagIcon className="w-3 h-3" /> Etiquetas del día
@@ -210,7 +219,7 @@ export function CellEditor({
                 <textarea
                   value={noteForm.notes}
                   onChange={e => setNoteForm(p => ({ ...p, notes: e.target.value }))}
-                  placeholder="Observaciones, incidencias, instrucciones especiales para este día…"
+                  placeholder="Ej: Son dos cargas, el cliente dice que están a 2 km la una de la otra · ITV por la mañana · Festivo local · Conductor de baja…"
                   className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 transition resize-none placeholder-slate-300"
                   rows={5}
                   autoFocus
@@ -276,7 +285,7 @@ function RouteCard({ route, savedTags, onEdit, onDelete }) {
           <span className={`flex-shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full ${cfg.chipCls}`}>
             {cfg.label}
           </span>
-          {route.title && <span className="text-xs font-semibold text-slate-600 truncate">{route.title}</span>}
+          {route.title && <span className="text-xs font-semibold text-slate-600 truncate" title={route.title}>{route.title}</span>}
           {isMulti && (
             <span className="flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">
               {daysBetween(route.departure_date, route.arrival_date) + 1} días
@@ -296,9 +305,9 @@ function RouteCard({ route, savedTags, onEdit, onDelete }) {
       <div className="px-4 py-3">
         <div className="flex items-center gap-2 mb-2">
           <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cfg.dot}`} />
-          <span className="text-sm font-semibold text-slate-800 truncate">{route.origin || '—'}</span>
+          <span className="text-sm font-semibold text-slate-800 truncate" title={route.origin || ''}>{route.origin || '—'}</span>
           <ArrowRight className="w-3.5 h-3.5 text-slate-300 flex-shrink-0" />
-          <span className="text-sm font-semibold text-slate-800 truncate">{route.destination || '—'}</span>
+          <span className="text-sm font-semibold text-slate-800 truncate" title={route.destination || ''}>{route.destination || '—'}</span>
         </div>
         <div className="flex items-center gap-4 text-xs mb-2">
           <span className="flex items-center gap-1.5 text-slate-500">
@@ -342,8 +351,10 @@ function RouteCard({ route, savedTags, onEdit, onDelete }) {
 
 // ─── ROUTE FORM ───────────────────────────────────────────────────────────────
 
-function RouteForm({ route, date, apiKey, allTags, onTagCreate, onTagDelete, onSave, onCancel }) {
+function RouteForm({ route, date, apiKey, vehicles = [], currentVehicleId, allTags, onTagCreate, onTagDelete, onSave, onCancel }) {
   const isNew = !route;
+  const initialVehicleId = route?.vehicle_id || currentVehicleId;
+  const [selectedVehicleId, setSelectedVehicleId] = useState(initialVehicleId);
   const def = route ?? {
     title: '', origin: '', destination: '',
     departure_date: toISODate(date), departure_time: '',
@@ -413,6 +424,7 @@ function RouteForm({ route, date, apiKey, allTags, onTagCreate, onTagDelete, onS
       company: { ...d.company, pricePerKm },
       tags: d.tags || [],
       reminder: { items: reminderItems },
+      vehicle_id: selectedVehicleId,
     });
     setSaving(false);
   };
@@ -441,6 +453,16 @@ function RouteForm({ route, date, apiKey, allTags, onTagCreate, onTagDelete, onS
       </div>
 
       <div className="p-4 space-y-4 bg-white">
+        {/* Vehicle picker */}
+        {vehicles.length > 1 && (
+          <VehiclePicker
+            vehicles={vehicles}
+            selectedId={selectedVehicleId}
+            originalId={initialVehicleId}
+            onChange={setSelectedVehicleId}
+          />
+        )}
+
         {/* Service name */}
         <IconInput icon={<Edit2 className="w-3.5 h-3.5" />} {...register('title')} placeholder="Nombre del servicio (opcional)" />
 
@@ -1111,6 +1133,118 @@ function TagPicker({ savedTags, selectedIds, onSelect, onCreateAndSelect, onDele
           className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600 font-medium transition">
           <Plus className="w-3.5 h-3.5" /> Nueva etiqueta
         </button>
+      )}
+    </div>
+  );
+}
+
+// ─── VEHICLE PICKER ───────────────────────────────────────────────────────────
+function VehiclePicker({ vehicles, selectedId, originalId, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const ref = useRef(null);
+
+  const selected = vehicles.find(v => v.id === selectedId);
+  const original = vehicles.find(v => v.id === originalId);
+  const changed  = selectedId !== originalId;
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) { setOpen(false); setQuery(''); } };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? vehicles.filter(v => (v.plate || '').toLowerCase().includes(q) || (v.driver || '').toLowerCase().includes(q))
+    : vehicles;
+
+  return (
+    <div ref={ref} className="relative">
+      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+        <Truck className="w-3 h-3" /> Vehículo asignado
+      </label>
+
+      <button type="button" onClick={() => setOpen(p => !p)}
+        className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl border-2 transition text-left ${
+          changed
+            ? 'border-amber-300 bg-amber-50 hover:bg-amber-100/80'
+            : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/40'
+        }`}>
+        <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${changed ? 'bg-amber-100' : 'bg-blue-50'}`}>
+          <Truck className={`w-4 h-4 ${changed ? 'text-amber-600' : 'text-blue-600'}`} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="font-bold text-sm text-slate-800 truncate">
+              {selected?.plate || <span className="italic text-slate-400 font-normal">Sin matrícula</span>}
+            </span>
+            {changed && (
+              <span className="text-[9px] font-bold text-amber-800 bg-amber-200 px-1.5 py-0.5 rounded uppercase tracking-wider flex-shrink-0">
+                Se moverá
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-slate-500 truncate flex items-center gap-1 mt-0.5">
+            {selected?.driver
+              ? <><User className="w-3 h-3 flex-shrink-0" />{selected.driver}</>
+              : <span className="italic text-slate-400">Sin conductor</span>}
+            {changed && original && (
+              <span className="text-[10px] text-amber-700 ml-2 truncate">
+                (desde {original.plate || '—'})
+              </span>
+            )}
+          </div>
+        </div>
+        <ChevronDown className={`w-4 h-4 text-slate-400 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="absolute z-30 left-0 right-0 mt-1.5 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden">
+          {vehicles.length > 6 && (
+            <div className="p-2 border-b border-slate-100">
+              <input type="text" autoFocus value={query} onChange={e => setQuery(e.target.value)}
+                placeholder="Buscar matrícula o conductor…"
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:border-blue-400 focus:ring-2 focus:ring-blue-100 focus:outline-none transition" />
+            </div>
+          )}
+          <div className="max-h-64 overflow-y-auto">
+            {filtered.length === 0 ? (
+              <div className="px-3 py-6 text-center text-xs text-slate-400">Ningún camión coincide</div>
+            ) : filtered.map(v => {
+              const isOriginal = v.id === originalId;
+              const isSelected = v.id === selectedId;
+              return (
+                <button key={v.id} type="button"
+                  onClick={() => { onChange(v.id); setOpen(false); setQuery(''); }}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition border-b border-slate-50 last:border-b-0 ${
+                    isSelected ? 'bg-blue-50' : 'hover:bg-slate-50'
+                  }`}>
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${isSelected ? 'bg-blue-100' : 'bg-slate-100'}`}>
+                    <Truck className={`w-3.5 h-3.5 ${isSelected ? 'text-blue-600' : 'text-slate-500'}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="font-bold text-sm text-slate-800 truncate">
+                        {v.plate || <span className="italic text-slate-400 font-normal">Sin matrícula</span>}
+                      </span>
+                      {isOriginal && (
+                        <span className="text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded uppercase tracking-wider flex-shrink-0">
+                          Actual
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-slate-500 truncate">
+                      {v.driver || <span className="italic text-slate-400">Sin conductor</span>}
+                    </div>
+                  </div>
+                  {isSelected && <Check className="w-4 h-4 text-blue-600 flex-shrink-0" />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );

@@ -418,10 +418,10 @@ export default function App() {
 
       {/* GRID */}
       <div className="flex-1 overflow-auto">
-        <table className="border-collapse" style={{ minWidth: `${220 + weekDates.length * 200}px`, width: '100%' }}>
+        <table className="border-collapse" style={{ minWidth: `${220 + weekDates.length * 200}px`, width: '100%', tableLayout: 'fixed' }}>
           <colgroup>
-            <col style={{ width: '220px', minWidth: '220px' }} />
-            {weekDates.map((_, i) => <col key={i} style={{ minWidth: '200px' }} />)}
+            <col style={{ width: '220px' }} />
+            {weekDates.map((_, i) => <col key={i} style={{ width: '200px' }} />)}
           </colgroup>
           <thead className="sticky top-0 z-20">
             <tr>
@@ -442,18 +442,22 @@ export default function App() {
             </tr>
           </thead>
           <tbody>
-            {filteredVehicles.map(v => (
+            {filteredVehicles.map((v, rowIdx) => {
+              const isEven = rowIdx % 2 === 0;
+              const rowBg = isEven ? 'bg-white' : 'bg-slate-50';
+              const rowHoverBg = 'group-hover/row:bg-blue-50/40';
+              return (
               <tr key={v.id} className="group/row">
-                <td className="sticky left-0 z-10 bg-white border-b border-r border-slate-200 p-3 align-middle group-hover/row:bg-slate-50 transition-colors">
+                <td className={`sticky left-0 z-10 ${rowBg} ${rowHoverBg} border-b-2 border-r-2 border-slate-200 p-3 align-middle transition-colors shadow-[1px_0_0_0_rgba(0,0,0,0.02)]`}>
                   <div className="flex items-center gap-2.5">
                     <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center flex-shrink-0">
                       <Truck className="w-4 h-4 text-blue-600" />
                     </div>
                     <div className="min-w-0">
-                      <div className="font-bold text-sm text-slate-800 truncate">
+                      <div className="font-bold text-sm text-slate-800 truncate" title={v.plate || ''}>
                         {v.plate || <span className="font-normal italic text-slate-400">Sin matrícula</span>}
                       </div>
-                      <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5 truncate">
+                      <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5 truncate" title={v.driver || ''}>
                         {v.driver ? <><User className="w-3 h-3 text-slate-400 flex-shrink-0" />{v.driver}</> : <span className="italic text-slate-400">Sin conductor</span>}
                       </div>
                       {(() => { const n = routes.filter(r => r.vehicle_id === v.id).length; return n > 0
@@ -472,7 +476,7 @@ export default function App() {
                   return (
                     <td key={di}
                       onClick={() => setDayPanel({ vehicleId: v.id, date: d })}
-                      className={`border-b border-r border-slate-200 p-2.5 align-top cursor-pointer transition-all relative group/cell ${isToday ? 'bg-blue-50/40 hover:bg-blue-50/80' : 'bg-white hover:bg-slate-50'}`}
+                      className={`border-b-2 border-r border-slate-200 p-2.5 align-top cursor-pointer transition-all relative group/cell ${isToday ? 'bg-blue-50/40 hover:bg-blue-50/80' : `${rowBg} ${rowHoverBg} hover:bg-blue-50/50`}`}
                       style={{ minHeight: '90px' }}>
                       {hasContent
                         ? <CellContent departing={departing} spanning={spanning} dayNote={dayNote} savedTags={savedTags} />
@@ -502,7 +506,8 @@ export default function App() {
                   );
                 })}
               </tr>
-            ))}
+              );
+            })}
             {filteredVehicles.length === 0 && (
               <tr>
                 <td colSpan={weekDates.length + 1} className="py-20 text-center">
@@ -604,6 +609,7 @@ export default function App() {
           <CellEditor
             vehicleId={dayPanel.vehicleId}
             date={dayPanel.date}
+            vehicles={vehicles}
             vehicleName={vehicle?.plate || ''}
             driverName={vehicle?.driver || ''}
             departing={departing}

@@ -100,9 +100,9 @@ function EventCard({ ev, onCellOpen }) {
         <div className="flex items-center gap-0.5 text-[10px] text-slate-500 whitespace-nowrap">
           {ev.r.origin || ev.r.destination ? (
             <>
-              <span>{ev.r.origin || '?'}</span>
+              <span className="truncate max-w-[120px]" title={ev.r.origin || ''}>{ev.r.origin || '?'}</span>
               <ArrowRight className="w-2 h-2 text-slate-300 flex-shrink-0" />
-              <span>{ev.r.destination || '?'}</span>
+              <span className="truncate max-w-[120px]" title={ev.r.destination || ''}>{ev.r.destination || '?'}</span>
             </>
           ) : (
             <span className="italic text-slate-400">Sin ubicación definida</span>
